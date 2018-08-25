@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, LambdaCase, TypeApplications,
-    ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds #-}
+    ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType #-}
 import GHC.TypeLits
 import Data.List (intersperse)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Promotion.Prelude.List
 
 import Text.LaTeX
 import Text.LaTeX.Packages.TikZ
@@ -25,15 +26,20 @@ theBody = do
         ]
     "Another string diagram"
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
-        raw $ draw2Cell $
-            (Id2 @G) `Tensor2`
-            ((Labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F)
-            `Cmp2` (Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H))
-            `Cmp2` ((Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F) `Tensor2` (Labelled2 "$\\delta$" :: H :--> Id1))
-            `Tensor2` (Id2 @G))
-            `Cmp2` (Labelled2 "$\\lambda$" :: (G `Cmp1` (F `Cmp1` Id1 `Cmp1` G)) :--> (G `Cmp1` F `Cmp1` G))
-            `Cmp2` (Id2 `Tensor2` (Labelled2 "$\\eta$" :: F :--> Id1) `Tensor2` Id2)
-            `Cmp2` (Labelled2 "$\\mu$" :: (G `Cmp1` Id1 `Cmp1` G) :--> Id1)
+        raw $ draw2Cell $ let
+                alpha = Labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F
+                beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
+                gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
+                delta = Labelled2 "$\\delta$" :: H :--> Id1
+                eta = Labelled2 "$\\eta$" :: F :--> Id1
+                mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
+                x = alpha
+                    `Cmp2` beta
+                    `Cmp2` (gamma `Tensor2` delta)
+                    `Cmp2` eta
+                        :: (F `Cmp1` F) :--> Id1
+            in
+            (Id2 @F) `Tensor2` ((Id2 @G `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
     "End of "
     hatex
 
@@ -54,17 +60,14 @@ translateh dx = translate dx 0
 translatev :: Float -> Point -> Point
 translatev dy = translate 0 dy
 
--- data A0Cell = M | C | D
 
--- data (a::A0Cell) :-> (b::A0Cell) where
---     Labelled1 :: Text -> (a :-> b)
---     Id1 :: a :-> a
---     Cmp1 :: (b :-> c) -> (a :-> b) -> (a :-> c)
+type A1Cell = [Symbol]
+type Id1 = '[]
+type Cmp1 a b = a :++ b
+type F = '["$F$"]
+type G = '["$G$"]
+type H = '["$H$"]
 
-data A1Cell = Labelled1 Symbol | Id1 | Cmp1 A1Cell A1Cell
-type F = Labelled1 "$F$"
-type G = Labelled1 "$G$"
-type H = Labelled1 "$H$"
 
 data (f :: A1Cell) :--> (g :: A1Cell) where
     Labelled2 :: (Reify1 f, Reify1 g) => Text -> f :--> g
@@ -82,24 +85,27 @@ width2Cell (Cmp2 alpha beta) = width2Cell alpha `max` width2Cell beta
 width2Cell (Tensor2 alpha beta) = width2Cell alpha + width2Cell beta
 width2Cell _ = realToFrac $ length (treeToList (reify1 @f)) `max` length (treeToList (reify1 @g))
 
-data Tree1 a (f :: A1Cell) where
-    TreeL :: KnownSymbol s => Proxy s -> a -> Tree1 a (Labelled1 s)
-    TreeId :: Tree1 a Id1
-    TreeCmp :: (Reify1 f, Reify1 g) => Tree1 a f -> Tree1 a g -> Tree1 a (Cmp1 f g)
+data Tree1 a (f :: [Symbol]) where
+    TreeNil :: Tree1 a Id1
+    TreeCons :: (Reify1 f, KnownSymbol s) => Proxy s -> a -> Tree1 a f -> Tree1 a (s ': f)
 
 treeToList :: Tree1 a f -> [(String, a)]
-treeToList TreeId = []
-treeToList (TreeL n x) = [(symbolVal n, x)]
-treeToList (TreeCmp t1 t2) = treeToList t1 ++ treeToList t2
+treeToList TreeNil = []
+treeToList (TreeCons n x q) = (symbolVal n, x) : treeToList q
 
-class Reify1 (f :: A1Cell) where
+class Reify1 (f :: [Symbol]) where
     reify1 :: Tree1 () f
-instance KnownSymbol s => Reify1 (Labelled1 s) where
-    reify1 = TreeL Proxy ()
-instance Reify1 Id1 where
-    reify1 = TreeId
-instance forall f g. (Reify1 f, Reify1 g) => Reify1 (Cmp1 f g) where
-    reify1 = TreeCmp (reify1 @f) (reify1 @g)
+instance Reify1 '[] where
+    reify1 = TreeNil
+instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
+    reify1 = TreeCons Proxy () (reify1 @f)
+
+splitTree1 :: forall f g a. Reify1 f => Tree1 a (f `Cmp1` g) -> (Tree1 a f, Tree1 a g)
+splitTree1 t = case (reify1 @f, t) of
+    (TreeNil, t) -> (TreeNil, t)
+    (TreeCons _ () _, TreeCons n x q) ->
+        let (q', q'') = splitTree1 q
+        in (TreeCons n x q', q'')
 
 type PointsFor f = Tree1 Point f
 
@@ -108,12 +114,10 @@ generatePoints init next = snd $ aux init
     where
         aux :: forall f. Reify1 f => Point -> (Point, PointsFor f)
         aux e = case reify1 @f of
-            TreeL n () -> (next e, TreeL n e)
-            TreeId -> (e, TreeId)
-            TreeCmp (t1 :: Tree1 () g) (t2 :: Tree1 () h) ->
-                let (new, t1') = aux @g e
-                    (new', t2') = aux @h new
-                in (new', TreeCmp t1' t2')
+            TreeNil -> (e, TreeNil)
+            TreeCons n () (q :: Tree1 () g) ->
+                let (new, q') = aux @g e
+                in (next new, TreeCons n new q')
 
 draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
 draw2Cell c =
@@ -144,11 +148,14 @@ draw2Cell c =
             in
             drawInner2Cell c1 p0 ptsf ptsh
             <> drawInner2Cell c2 p1 ptsh ptsg
-        drawInner2Cell (Tensor2 c1 c2) p0 (TreeCmp ptsf1 ptsf2) (TreeCmp ptsg1 ptsg2) =
-            let p1 = translatev (width2Cell c1) p0
+            <> T.unlines [ "\\node at " <> render p <> " {" <> T.pack n <> "};" | (n, p) <- treeToList ptsh ]
+        drawInner2Cell (Tensor2 c1 c2) p0 ptsf ptsg =
+            let p1 = translatev (width2Cell c2) p0
+                (ptsf1, ptsf2) = splitTree1 ptsf
+                (ptsg1, ptsg2) = splitTree1 ptsg
             in
-            drawInner2Cell c1 p0 ptsf1 ptsg1
-            <> drawInner2Cell c2 p1 ptsf2 ptsg2
+            drawInner2Cell c2 p0 ptsf2 ptsg2
+            <> drawInner2Cell c1 p1 ptsf1 ptsg1
 
 
 
