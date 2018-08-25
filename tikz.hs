@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, LambdaCase, TypeApplications,
-    ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType #-}
+    ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts #-}
 import GHC.TypeLits
 import Data.List (intersperse)
 import qualified Data.Text as T
@@ -39,7 +39,14 @@ theBody = do
                     `Cmp2` eta
                         :: (F `Cmp1` F) :--> Id1
             in
-            (Id2 @F) `Tensor2` ((Id2 @G `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
+            (Id2 @G `Tensor2` x `Tensor2` Id2 @G `Cmp2` mu)
+    "Another string diagram"
+    center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
+        raw $ draw2Cell $ let
+                alpha = Labelled2 "$\\beta$" :: Id1 :--> (F `Cmp1` G)
+                beta = Labelled2 "$\\alpha$" :: (F `Cmp1` G) :--> Id1
+            in
+            Id2 @H `Tensor2` (alpha `Cmp2` beta) `Tensor2` Id2 @H
     "End of "
     hatex
 
@@ -107,6 +114,11 @@ splitTree1 t = case (reify1 @f, t) of
         let (q', q'') = splitTree1 q
         in (TreeCons n x q', q'')
 
+mergeTree1 :: forall f g a. (Reify1 (f `Cmp1` g)) => Tree1 a f -> Tree1 a g -> Tree1 a (f `Cmp1` g)
+mergeTree1 TreeNil t2 = t2
+mergeTree1 (TreeCons n x q) t2 = case reify1 @(f `Cmp1` g) of
+    TreeCons _ () _ -> TreeCons n x $ mergeTree1 q t2
+
 type PointsFor f = Tree1 Point f
 
 generatePoints :: Reify1 f => Point -> (Point -> Point) -> PointsFor f
@@ -119,6 +131,17 @@ generatePoints init next = snd $ aux init
                 let (new, q') = aux @g e
                 in (next new, TreeCons n new q')
 
+genBoundaries :: forall f g. (Reify1 f, Reify1 g) => (f :--> g) -> Point -> (PointsFor f, PointsFor g)
+genBoundaries (Cmp2 c1 c2) p0 = (fst $ genBoundaries c1 p0, snd $ genBoundaries c2 p0)
+genBoundaries (Tensor2 c1 c2) p0 = let
+        (l1, r1) = genBoundaries c1 (translatev (width2Cell c2) p0)
+        (l2, r2) = genBoundaries c2 p0
+    in (mergeTree1 l1 l2, mergeTree1 r1 r2)
+genBoundaries _ p0 = let
+        ptsf = generatePoints (translate 0 0.5 p0) (translatev 1)
+        ptsg = generatePoints (translate 0 0.5 p0) (translatev 1)
+    in (ptsf, ptsg)
+
 draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
 draw2Cell c =
     drawInner2Cell c p0 ptsf ptsg
@@ -126,8 +149,8 @@ draw2Cell c =
         <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- treeToList ptsg ]
     where
         p0 = Point 0 0
-        ptsf = generatePoints (translate 0 0.5 p0) (translatev 1)
-        ptsg = generatePoints (translate (length2Cell c) 0.5 p0) (translatev 1)
+        ptsf = fst $ genBoundaries c p0
+        ptsg = snd $ genBoundaries c (translateh (length2Cell c) p0)
 
         mkLine p1 p2 = "\\draw " <> render p1 <> " to[out=0, in=180] " <> render p2 <> ";"
         mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};"
@@ -142,13 +165,16 @@ draw2Cell c =
             T.unlines [ mkLine p1 p | (_, p1) <- treeToList ptsf ]
             <> T.unlines [ mkLine p p2 | (_, p2) <- treeToList ptsg ]
             <> mkNode p n
-        drawInner2Cell (Cmp2 c1 c2) p0 ptsf ptsg =
-            let p1 = translateh (length2Cell c1) p0
-                ptsh = generatePoints (translate (length2Cell c1) 0.5 p0) (translatev 1)
+        drawInner2Cell (Cmp2 (c1 :: f :--> h) c2) p0 ptsf ptsg =
+            let p1 = translateh (length2Cell c1 - 0.2) p0
+                p2 = translateh 0.2 p1
+                ptsleft = snd $ genBoundaries c1 p1
+                ptsright = fst $ genBoundaries c2 p2
             in
-            drawInner2Cell c1 p0 ptsf ptsh
-            <> drawInner2Cell c2 p1 ptsh ptsg
-            <> T.unlines [ "\\node at " <> render p <> " {" <> T.pack n <> "};" | (n, p) <- treeToList ptsh ]
+            drawInner2Cell c1 p0 ptsf ptsleft
+            <> drawInner2Cell (Id2 @h) p1 ptsleft ptsright
+            <> drawInner2Cell c2 p2 ptsright ptsg
+            <> T.unlines [ "\\node at " <> render p <> " {" <> T.pack n <> "};" | (n, p) <- treeToList ptsleft ]
         drawInner2Cell (Tensor2 c1 c2) p0 ptsf ptsg =
             let p1 = translatev (width2Cell c2) p0
                 (ptsf1, ptsf2) = splitTree1 ptsf
