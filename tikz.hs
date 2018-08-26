@@ -237,16 +237,9 @@ genBoundaries c p = (centerBdy p $ leftBdy c p, centerBdy p $ rightBdy c p)
         rightBdy _ p = defaultBdy p
 
 
-mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";"
-mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};"
-mkNode p label = "\\node at " <> render p <> " [circle, draw, fill=white] {" <> label <> "};"
-drawbb (lo, hi) len =
-    "\\draw " <>
-        render lo <> " -- " <>
-        render (translateh len lo) <> " -- " <>
-        render (translateh len hi) <> " -- " <>
-        render hi <> " -- " <>
-        "cycle;"
+mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
+mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};\n"
+mkNode p label = "\\node at " <> render p <> " [circle, draw, fill=white] {" <> label <> "};\n"
 
 draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
 draw2Cell c = drawCanon2Cell (Point 0 0) (twoCellToCanonForm c)
@@ -297,21 +290,16 @@ twoCellToCanonForm (Tensor2 (c1 :: f' :--> g') (c2 :: f'' :--> g'')) =
 
 type TwoCellBoundary = [Rational]
 
-defaultBoundary :: Int -> TwoCellBoundary
-defaultBoundary n = replicate (n+1) baseWidth
-
-dumbBoundaries :: TwoCellCanonForm -> [TwoCellBoundary]
-dumbBoundaries [] = []
-dumbBoundaries (ca:q) =
-    let q' = dumbBoundaries q
-        q'' = if null q' then [defaultBoundary (totalOutputs ca)] else q'
-     in defaultBoundary (totalInputs ca) : q''
-
 type BdyDelta = (Int, Rational)
 
 constructBoundaries :: TwoCellCanonForm -> [TwoCellBoundary]
-constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs (last c))]) c
+constructBoundaries c = snd $ foldr pushAtom ([], [lastBoundary]) c
     where
+        lastBoundary = defaultBoundary (totalOutputs (last c))
+
+        defaultBoundary :: Int -> TwoCellBoundary
+        defaultBoundary n = replicate (n+1) baseWidth
+
         projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
                 ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
         projectBdyL TwoCellAtom{..} bdy =
@@ -333,7 +321,6 @@ constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs
                else Right (head mid, tail $ init mid, last mid),
             bdyafter)
 
-
         propagateDelta :: TwoCellAtom -> BdyDelta -> [BdyDelta]
         propagateDelta TwoCellAtom{..} (i, delta) =
             if (inputs == 0 && i == before) || (before < i && i < before + inputs)
@@ -348,8 +335,7 @@ constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs
 
         deepPropagateDeltas :: [BdyDelta] -> TwoCellCanonForm -> [TwoCellBoundary] -> [TwoCellBoundary]
         deepPropagateDeltas _ _ [] = []
-        deepPropagateDeltas deltas atoms (bdy:bdys) =
-                newbdy : newbdys
+        deepPropagateDeltas deltas atoms (bdy:bdys) = newbdy : newbdys
             where
                 newbdy = foldr applyDelta bdy deltas
                 newbdys = case atoms of
@@ -359,8 +345,8 @@ constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs
                          in deepPropagateDeltas newdeltas atoms bdys
 
         backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> (TwoCellBoundary, [BdyDelta])
-        backpropBoundary ca@TwoCellAtom{..} bdy =
-            let (bdybefore, mid, bdyafter) = projectBdyR ca bdy
+        backpropBoundary ca@TwoCellAtom{..} bdy = let
+                (bdybefore, mid, bdyafter) = projectBdyR ca bdy
                 h = case mid of
                       Left h -> h
                       Right (x1, mid, x2) -> x1 + sum mid + x2
@@ -368,18 +354,16 @@ constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs
                 deltas = if newh > h
                     then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
                     else []
-                newmid =
-                    if inputs == 0 then [h]
-                    else let
+                newmid = if inputs == 0 then [h] else let
                         newmid = replicate (inputs - 1) baseWidth
                         (x1, x2) = case mid of
                             _ | newh > h -> (baseWidth, baseWidth)
-                            Left h -> (baseWidth, baseWidth + h - newh)
+                            Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
                             Right (x1, mid, x2) -> let
                                 outWidth = sum mid
                                 inWidth = sum newmid
                               in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
-                        in [x1] ++ newmid ++ [x2]
+                    in [x1] ++ newmid ++ [x2]
             in (bdybefore ++ newmid ++ bdyafter, deltas)
 
         pushAtom :: TwoCellAtom -> (TwoCellCanonForm, [TwoCellBoundary]) -> (TwoCellCanonForm, [TwoCellBoundary])
@@ -416,9 +400,12 @@ draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
             p1 <- popleft
             p2 <- popright
             tell $ mkLine "0" "180" p1 p2
-        (p1, _, bdyl, _) <- get
-        let widthInputs = sum $ take (inputs+1) bdyl
-        let p = translate (twoCellLength / 2) (realToFrac widthInputs / 2) p1
+        (p1, _, bdyl, bdyr) <- get
+        let width = case () of
+                _ | inputs == 0 && outputs == 0 -> head bdyl
+                _ | inputs == 0 -> head bdyr + sum (take outputs bdyr)
+                _  -> head bdyl + sum (take inputs bdyl)
+        let p = translate (twoCellLength / 2) (width / 2) p1
         replicateM_ inputs $ do
             p1 <- popleft
             let angle = if y p == y p1 then "180" else if y p < y p1 then "90" else "-90"
@@ -432,16 +419,14 @@ draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
             p1 <- popleft
             p2 <- popright
             tell $ mkLine "0" "180" p1 p2
-        p1 <- popleft
-        p2 <- popright
-        tell $ "\\draw[dashed] " <> render p1 <> " -- " <> render p2 <> ";"
 
 drawCanon2Cell :: Point -> TwoCellCanonForm -> Text
 drawCanon2Cell p c = let
     bdys = constructBoundaries c
     in evalRWS' () (p, bdys) $ forM_ c $ \ca -> do
-        (p, bdys) <- get
-        tell $ draw2CellAtom p (head bdys) (head $ tail bdys) ca
-        -- tell $ draw2CellAtom p (defaultBoundary (totalInputs ca)) (defaultBoundary (totalOutputs ca)) ca
-        put (translateh twoCellLength p, tail bdys)
+            (p, bdys) <- get
+            tell $ draw2CellAtom p (head bdys) (head $ tail bdys) ca
+            put (translateh twoCellLength p, tail bdys)
+       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- treeToList ptsf ]
+       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- treeToList ptsg ]
 
