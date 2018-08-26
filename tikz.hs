@@ -32,67 +32,67 @@ theBody = do
         , "\\draw (4,1) node[anchor=west] {$\\icol{y\\\\v}$};"
         ]
     "Another string diagram"
-    -- center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
-    --     raw $ draw2Cell $ let
-    --             alpha = Labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F
-    --             beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
-    --             gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
-    --             delta = Labelled2 "$\\delta$" :: H :--> Id1
-    --             eta = Labelled2 "$\\eta$" :: F :--> Id1
-    --             mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
-    --             nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
-    --             omega = Labelled2 "$\\omega$" :: Id1 :--> (F `Cmp1` F)
-    --             epsilon = Labelled2 "$\\epsilon$" :: G :--> G
-    --             x = omega
-    --                 `Cmp2` alpha
-    --                 `Cmp2` beta
-    --                 `Cmp2` (gamma `Tensor2` delta)
-    --                 `Cmp2` eta
-    --                     :: Id1 :--> Id1
-    --         in
-    --         (nu `Cmp2`((epsilon `Cmp2` epsilon)
-    --             `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
+    center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
+        raw $ draw2Cell $ let
+                alpha = Labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F
+                beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
+                gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
+                delta = Labelled2 "$\\delta$" :: H :--> Id1
+                eta = Labelled2 "$\\eta$" :: F :--> Id1
+                mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
+                nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
+                omega = Labelled2 "$\\omega$" :: Id1 :--> (F `Cmp1` F)
+                epsilon = Labelled2 "$\\epsilon$" :: G :--> G
+                x = omega
+                    `Cmp2` alpha
+                    `Cmp2` beta
+                    `Cmp2` (gamma `Tensor2` delta)
+                    `Cmp2` eta
+                        :: Id1 :--> Id1
+            in
+            (nu `Cmp2`((epsilon `Cmp2` epsilon)
+                `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
                 beta = Labelled2 "$\\beta$" :: F :--> (F `Cmp1` G)
                 gamma = Labelled2 "$\\gamma$" :: G :--> H
                 eta = Labelled2 "$\\eta$" :: F :--> Id1
             in beta `Cmp2` (eta `Tensor2` gamma)
-    -- center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
-    --     raw $ draw2Cell $ let
-    --             beta = Labelled2 "$\\beta$" :: F :--> (F `Cmp1` G `Cmp1` H)
-    --             gamma = Labelled2 "$\\gamma$" :: G :--> F
-    --             delta = Labelled2 "$\\delta$" :: H :--> Id1
-    --             eta = Labelled2 "$\\eta$" :: F :--> Id1
-    --             omega = Labelled2 "$\\omega$" :: Id1 :--> F
-    --             x = beta
-    --                 `Cmp2` (eta `Tensor2` gamma `Tensor2` delta)
-    --                 `Cmp2` eta
-    --         in x
-    -- center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
-    --     raw $ draw2Cell $ let
-    --             beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
-    --             gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
-    --             delta = Labelled2 "$\\delta$" :: H :--> Id1
-    --             eta = Labelled2 "$\\eta$" :: F :--> Id1
-    --             mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
-    --             nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
-    --             omega = Labelled2 "$\\omega$" :: Id1 :--> F
-    --             x = omega
-    --                 `Cmp2` beta
-    --                 `Cmp2` (gamma `Tensor2` delta)
-    --                 `Cmp2` eta
-    --                     :: Id1 :--> Id1
-    --         in
-    --         (nu `Cmp2` (Id2 @G `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
-    -- "Another string diagram"
-    -- center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
-    --     raw $ draw2Cell $ let
-    --             alpha = Labelled2 "$\\beta$" :: Id1 :--> (F `Cmp1` G)
-    --             beta = Labelled2 "$\\alpha$" :: (F `Cmp1` G) :--> Id1
-    --             circle = Id2 @H `Tensor2` (alpha `Cmp2` beta) `Tensor2` Id2 @H
-    --         in
-    --         circle `Cmp2` (Id2 @H `Tensor2` Id2 @H) `Cmp2` flip2Cell circle
+    center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
+        raw $ draw2Cell $ let
+                beta = Labelled2 "$\\beta$" :: F :--> (F `Cmp1` G `Cmp1` H)
+                gamma = Labelled2 "$\\gamma$" :: G :--> F
+                delta = Labelled2 "$\\delta$" :: H :--> Id1
+                eta = Labelled2 "$\\eta$" :: F :--> Id1
+                omega = Labelled2 "$\\omega$" :: Id1 :--> F
+                x = beta
+                    `Cmp2` (eta `Tensor2` gamma `Tensor2` delta)
+                    `Cmp2` eta
+            in x
+    center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
+        raw $ draw2Cell $ let
+                beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
+                gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
+                delta = Labelled2 "$\\delta$" :: H :--> Id1
+                eta = Labelled2 "$\\eta$" :: F :--> Id1
+                mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
+                nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
+                omega = Labelled2 "$\\omega$" :: Id1 :--> F
+                x = omega
+                    `Cmp2` beta
+                    `Cmp2` (gamma `Tensor2` delta)
+                    `Cmp2` eta
+                        :: Id1 :--> Id1
+            in
+            (nu `Cmp2` (Id2 @G `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
+    "Another string diagram"
+    center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
+        raw $ draw2Cell $ let
+                alpha = Labelled2 "$\\beta$" :: Id1 :--> (F `Cmp1` G)
+                beta = Labelled2 "$\\alpha$" :: (F `Cmp1` G) :--> Id1
+                circle = Id2 @H `Tensor2` (alpha `Cmp2` beta) `Tensor2` Id2 @H
+            in
+            circle `Cmp2` (Id2 @H `Tensor2` Id2 @H) `Cmp2` flip2Cell circle
     "End of "
     hatex
 
@@ -249,51 +249,7 @@ drawbb (lo, hi) len =
         "cycle;"
 
 draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
-draw2Cell c0 =
-    drawInner2Cell c (lo, hi) ptsf ptsg
-        <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- treeToList ptsf ]
-        <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- treeToList ptsg ]
-    <> drawCanon2Cell hi (twoCellToCanonForm c0)
-    where
-        c = canonicalize2Cell c0
-        lo = Point 0 0
-        hi = translatev (width2Cell c) lo
-        (ptsf, ptsg') = genBoundaries c (lo, hi)
-        ptsg = fmap (translateh (length2Cell c)) $ ptsg'
-
-        drawInner2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> (Point,Point) -> PointsFor f -> PointsFor g -> Text
-        drawInner2Cell Id2 _ ptsf ptsg = T.unlines
-            [ mkLine "0" "180" p1 p2 | (_, p1) <- treeToList ptsf | (_, p2) <- treeToList ptsg ]
-        drawInner2Cell c@(Labelled2 n) bb@(lo@(Point _ loy), (Point _ hiy)) ptsf ptsg =
-            let p = translate 1 ((hiy - loy) / 2) lo
-            in
-            T.unlines [
-                let angle = if y p == y p1 then "180" else if y p < y p1 then "90" else "-90"
-                 in mkLine "0" angle p1 p
-                | (_, p1) <- treeToList ptsf ]
-            <> T.unlines [
-                let angle = if y p == y p2 then "0" else if y p < y p2 then "90" else "-90"
-                 in mkLine angle "180" p p2
-                | (_, p2) <- treeToList ptsg ]
-            <> drawbb bb (length2Cell c)
-            <> mkNode p n
-        drawInner2Cell (Cmp2 (c1 :: f :--> h) c2) bb ptsf ptsg =
-            let bb1 = translatebb (length2Cell c1) 0 bb
-                bb2 = translatebb 0 0 bb1
-                ptsleft = snd $ genBoundaries c1 bb1
-                ptsright = fst $ genBoundaries c2 bb2
-            in
-            drawInner2Cell c1 bb ptsf ptsleft
-            <> drawInner2Cell (Id2 @h) bb1 ptsleft ptsright
-            <> drawInner2Cell c2 bb2 ptsright ptsg
-            <> T.unlines [ "\\node at " <> render p <> " {" <> T.pack n <> "};" | (n, p) <- treeToList ptsleft ]
-        drawInner2Cell (Tensor2 c1 c2) (lo, hi) ptsf ptsg =
-            let mid = translatev (width2Cell c2) lo
-                (ptsf1, ptsf2) = splitTree1 ptsf
-                (ptsg1, ptsg2) = splitTree1 ptsg
-            in
-            drawInner2Cell c2 (lo, mid) ptsf2 ptsg2
-            <> drawInner2Cell c1 (mid, hi) ptsf1 ptsg1
+draw2Cell c = drawCanon2Cell (Point 0 0) (twoCellToCanonForm c)
 
 
 type TwoCellCanonForm = [TwoCellAtom]
@@ -351,32 +307,14 @@ dumbBoundaries (ca:q) =
         q'' = if null q' then [defaultBoundary (totalOutputs ca)] else q'
      in defaultBoundary (totalInputs ca) : q''
 
+type BdyDelta = (Int, Rational)
+
 constructBoundaries :: TwoCellCanonForm -> [TwoCellBoundary]
--- constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs (last c))]) c
-constructBoundaries c = lotspropagate 1 c $ dumbBoundaries c
+constructBoundaries c = snd $ foldr pushAtom ([], [defaultBoundary (totalOutputs (last c))]) c
     where
-        update :: TwoCellAtom -> (TwoCellBoundary, TwoCellBoundary) -> (TwoCellBoundary, TwoCellBoundary)
-        update TwoCellAtom{..} (bdyl, bdyr) =
-            let (bdylbefore, (midl, bdylafter)) =
-                    fmap (splitAt (inputs+1)) $ splitAt before bdyl
-                (bdyrbefore, (midr, bdyrafter)) =
-                    fmap (splitAt (outputs+1)) $ splitAt before bdyr
-                mergedbefore = zipWith max bdylbefore bdyrbefore
-                mergedafter = assert (length bdylafter == length bdyrafter) $ zipWith max bdylafter bdyrafter
-                hmid = sum midl `max` sum midr
-                recenter [] = [hmid]
-                recenter [_] = [hmid]
-                recenter mid =
-                    let mid' = init $ tail mid
-                        x = (hmid - sum mid') / 2
-                     in (\r -> assert (sum r == hmid) r) $[x] ++ mid' ++ [x]
-
-            in (mergedbefore ++ recenter midl ++ mergedafter,
-                mergedbefore ++ recenter midr ++ mergedafter)
-
-        projectBdy :: TwoCellAtom -> TwoCellBoundary ->
+        projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
                 ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-        projectBdy TwoCellAtom{..} bdy =
+        projectBdyL TwoCellAtom{..} bdy =
             let (bdybefore, (mid, bdyafter)) =
                     fmap (splitAt (inputs+1)) $ splitAt before bdy
              in (bdybefore,
@@ -384,56 +322,72 @@ constructBoundaries c = lotspropagate 1 c $ dumbBoundaries c
                then Left (head mid)
                else Right (head mid, tail $ init mid, last mid),
             bdyafter)
+        projectBdyR :: TwoCellAtom -> TwoCellBoundary ->
+                ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
+        projectBdyR TwoCellAtom{..} bdy =
+            let (bdybefore, (mid, bdyafter)) =
+                    fmap (splitAt (outputs+1)) $ splitAt before bdy
+             in (bdybefore,
+            if outputs == 0
+               then Left (head mid)
+               else Right (head mid, tail $ init mid, last mid),
+            bdyafter)
 
 
-        -- propagateDelta :: (Int, Rational) -> TwoCellAtom -> [(Int, Rational)]
-        -- propagateDelta (i, delta) TwoCellAtom{..} =
-        --     if i < before
-        --        then (i, delta)
-        --     else if i > before + inputs
-        --        then (i - inputs + outputs, delta)
-        --     else if inputs == 0
-        --        then
-        --     let (bdybefore, (mid, bdyafter)) =
-        --             fmap (splitAt (inputs+1)) $ splitAt before bdy
-        --         recenter [] = [hmid]
-        --         recenter [_] = [hmid]
-        --         recenter mid =
-        --             let mid' = init $ tail mid
-        --                 x = (hmid - sum mid') / 2
-        --              in (\r -> assert (sum r == hmid) r) $[x] ++ mid' ++ [x]
+        propagateDelta :: TwoCellAtom -> BdyDelta -> [BdyDelta]
+        propagateDelta TwoCellAtom{..} (i, delta) =
+            if (inputs == 0 && i == before) || (before < i && i < before + inputs)
+               then [(before, delta/2), (before+outputs, delta/2)]
+            else if i >= before + inputs
+               then [(i - inputs + outputs, delta)]
+            else [(i, delta)]
 
-        --     in bdybefore ++ recenter midl ++ bdyafter
+        applyDelta :: BdyDelta -> TwoCellBoundary -> TwoCellBoundary
+        applyDelta (i, delta) bdy =
+            take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
-        propagate :: TwoCellCanonForm -> [TwoCellBoundary] -> [TwoCellBoundary]
-        propagate c bdys =
-            traceShowId $ traceShow bdys $
-            assert (length c + 1 == length bdys) $
-            (\res -> assert (length res == length bdys) res) $
-            evalRWS' () (head bdys, tail bdys) $ do
-                forM_ c $ \ca -> do
-                    (bdyl, bdys) <- get
-                    let bdyr = head bdys
-                    let (bdyl', bdyr') = if elem ca $ take 3 c then update ca (bdyl, bdyr) else (bdyl, bdyr)
-                    put (bdyr', tail bdys)
-                    tell [bdyl']
-                (bdyl, _) <- get
-                tell [bdyl]
+        deepPropagateDeltas :: [BdyDelta] -> TwoCellCanonForm -> [TwoCellBoundary] -> [TwoCellBoundary]
+        deepPropagateDeltas _ _ [] = []
+        deepPropagateDeltas deltas atoms (bdy:bdys) =
+                newbdy : newbdys
+            where
+                newbdy = foldr applyDelta bdy deltas
+                newbdys = case atoms of
+                    [] -> bdys
+                    (atom:atoms) ->
+                        let newdeltas = concatMap (propagateDelta atom) deltas
+                         in deepPropagateDeltas newdeltas atoms bdys
 
-        propagatebw c bdys =
-            reverse $ propagate (fmap flip2CellAtom $ reverse c) (reverse bdys)
-
-        lotspropagate 0 c = id
-        -- lotspropagate n c = propagatebw c . propagate c . lotspropagate (n-1) c
-        lotspropagate n c = propagate c . lotspropagate (n-1) c
+        backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> (TwoCellBoundary, [BdyDelta])
+        backpropBoundary ca@TwoCellAtom{..} bdy =
+            let (bdybefore, mid, bdyafter) = projectBdyR ca bdy
+                h = case mid of
+                      Left h -> h
+                      Right (x1, mid, x2) -> x1 + sum mid + x2
+                newh = realToFrac (inputs + 1) * baseWidth
+                deltas = if newh > h
+                    then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
+                    else []
+                newmid =
+                    if inputs == 0 then [h]
+                    else let
+                        newmid = replicate (inputs - 1) baseWidth
+                        (x1, x2) = case mid of
+                            _ | newh > h -> (baseWidth, baseWidth)
+                            Left h -> (baseWidth, baseWidth + h - newh)
+                            Right (x1, mid, x2) -> let
+                                outWidth = sum mid
+                                inWidth = sum newmid
+                              in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
+                        in [x1] ++ newmid ++ [x2]
+            in (bdybefore ++ newmid ++ bdyafter, deltas)
 
         pushAtom :: TwoCellAtom -> (TwoCellCanonForm, [TwoCellBoundary]) -> (TwoCellCanonForm, [TwoCellBoundary])
         pushAtom ca (atoms, bdys) = assert (length atoms + 1 == length bdys) $
-            let atoms' = ca : atoms
-                bdy' = defaultBoundary (totalInputs ca) : bdys
-                -- bdy'' = lotspropagate 1 atoms' bdy'
-                bdy'' = propagate atoms' bdy'
-             in (atoms', bdy'')
+            let (bdy, deltas) = backpropBoundary ca (head bdys)
+                bdys' = deepPropagateDeltas deltas atoms bdys
+             in (ca : atoms, bdy : bdys')
+
 
 twoCellLength :: Rational
 twoCellLength = 1
@@ -491,77 +445,3 @@ drawCanon2Cell p c = let
         -- tell $ draw2CellAtom p (defaultBoundary (totalInputs ca)) (defaultBoundary (totalOutputs ca)) ca
         put (translateh twoCellLength p, tail bdys)
 
-
-
--- data A2CellF r (f :: A1Cell) (g :: A1Cell) where
---     Labelled2F :: (Reify1 f, Reify1 g) => Text -> A2CellF r f g
---     Id2F :: Reify1 f => A2CellF r f f
---     Cmp2F :: (Reify1 f, Reify1 g, Reify1 h) => r f g -> r g h -> A2CellF r f h
---     Tensor2F :: (Reify1 f, Reify1 g, Reify1 f', Reify1 g') => r f g -> r f' g' -> A2CellF r (Cmp1 f f') (Cmp1 g g')
-
--- data Fix r a b = In { out :: r (Fix r) a b }
-
--- class HHFunctor f where
---     hhfmap :: ProfNat r s -> ProfNat (f r) (f s)
-
--- type ProfNat p q = forall a b. (Reify1 a, Reify1 b) => p a b -> q a b
-
--- cata :: HHFunctor r => ProfNat (r p) p -> ProfNat (Fix r) p
--- cata alg = alg . hhfmap (cata alg) . out
-
-
--- unroll2Cell :: f :--> g -> Fix A2CellF f g
--- unroll2Cell (Labelled2 n) = In $ Labelled2F n
--- unroll2Cell Id2 = In Id2F
--- unroll2Cell (Cmp2 c1 c2) = In $ Cmp2F (unroll2Cell c1) (unroll2Cell c2)
--- unroll2Cell (Tensor2 c1 c2) = In $ Tensor2F (unroll2Cell c1) (unroll2Cell c2)
-
--- roll2Cell :: Fix A2CellF f g -> f :--> g
--- roll2Cell = undefined
-
--- data K t a b = K t
-
--- mapK :: (t -> t') -> K t a b -> K t' a b
--- mapK f (K x) = K (f x)
-
--- asK :: x a b -> t -> K t a b
--- asK _ x = K x
-
--- splitBBox :: A2CellF (K (Rational, Rational)) f g -> BoundingBox -> A2CellF (K BoundingBox) f g
--- splitBBox Id2F _ = Id2F
--- splitBBox (Labelled2F n) _ = Labelled2F n
--- splitBBox (Cmp2F c1@(K (l1, _)) c2) (lo, hi) =
---     Cmp2F (asK c1 (lo, hi)) (asK c2 (translatebb l1 0 (lo, hi)))
--- splitBBox (Tensor2F c1 c2@(K (_, w2))) (lo, hi) =
---     let mid = translate 0 w2 lo
---      in Tensor2F (asK c1 (mid, hi)) (asK c2 (lo, mid))
-
--- dimensions :: (Reify1 f, Reify1 g) => f :--> g -> K (Rational, Rational) f g
--- dimensions c = K (length2Cell c, width2Cell c)
-
--- splitBBox' :: (HHFunctor A2CellF, Reify1 f, Reify1 g) => f :--> g -> BoundingBox -> A2CellF (K BoundingBox) f g
--- splitBBox' = splitBBox . hhfmap (dimensions . roll2Cell) . out . unroll2Cell
-
-
-
--- \begin{tikzpicture}[scale=0.5]
--- \path
---     coordinate[dot, label=right:$\eta$] (eta)
---     ++(1,1) coordinate[label=right:$a$] (a)
---     ++(1,1) coordinate[dot, label=left:$\epsilon$] (epsilon)
---     ++(-1,1) coordinate[label=right:$b$] (b)
---     ++(-2,0) coordinate[label=left:$\icol{x\\I}$] (br)
---     (eta) ++(1,-1) coordinate[label=right:$c$] (c)
---     ++(2,0) coordinate[label=right:$tl$] (tl);
--- \draw (tl) -- (c) to[out=180, in=-90] (eta) to[out=90, in=180] (a) to[out=0, in=-90] (epsilon) to[out=90, in=0] (b) -- (br);
--- \begin{pgfonlayer}{background}
--- \fill[catc] (tl) -- (c) -- ++(0,-1) -- ++(2,0) -- cycle;
--- \fill[catd] (tl) -- (c) -- ++(0,1) -- ++(2,0) -- cycle;
-
--- \fill[catc] (c) -- (a) -- ++(0,1) -- ++(-2,0) -- ++(0,-4) -- ++(2,0) -- cycle;
--- \fill[catd] (c) to[out=180, in=-90] (eta) to[out=90, in=180] (a) -- cycle;
-
--- \fill[catd] (a) -- (b) -- ++(0,1) -- ++(2,0) -- ++(0,-4) -- ++(-2,0) -- cycle;
--- \fill[catc] (a) to[out=0, in=-90] (epsilon) to[out=90, in=0] (b) -- cycle;
--- \end{pgfonlayer}
--- \end{tikzpicture}
