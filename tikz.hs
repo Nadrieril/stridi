@@ -18,6 +18,9 @@ import Text.LaTeX.Packages.TikZ
 import Text.LaTeX.Base.Syntax hiding (In)
 import Text.LaTeX.Base.Class
 
+evalRWS' :: r -> s -> RWS r w s a -> w
+evalRWS' r s rws = snd $ evalRWS rws r s
+
 main :: IO ()
 main = execLaTeXT theBody >>= TIO.putStrLn . render
 
@@ -128,19 +131,8 @@ data (f :: A1Cell) :--> (g :: A1Cell) where
     Labelled2 :: (Reify1 f, Reify1 g) => Text -> f :--> g
     Id2 :: Reify1 f => f :--> f
     Cmp2 :: (Reify1 f, Reify1 g, Reify1 h) => (f :--> g) -> (g :--> h) -> (f :--> h)
-    Tensor2 :: (Reify1 f, Reify1 g, Reify1 f', Reify1 g',
-                Reify1 (Cmp1 f f'), Reify1 (Cmp1 g g'), Reify1 (Cmp1 f g'), Reify1 (Cmp1 g f')) =>
+    Tensor2 :: (Reify1 f, Reify1 g, Reify1 f', Reify1 g') =>
         (f :--> g) -> (f' :--> g') -> (Cmp1 f f' :--> Cmp1 g g')
-
-length2Cell :: (f :--> g) -> Rational
-length2Cell (Cmp2 alpha beta) = length2Cell alpha + length2Cell beta
-length2Cell (Tensor2 alpha beta) = length2Cell alpha `max` length2Cell beta
-length2Cell _ = 2
-
-width2Cell :: forall f g. (Reify1 f, Reify1 g) => (f :--> g) -> Rational
-width2Cell (Cmp2 alpha beta) = width2Cell alpha `max` width2Cell beta
-width2Cell (Tensor2 alpha beta) = width2Cell alpha + width2Cell beta
-width2Cell _ = realToFrac $ length (treeToList (reify1 @f)) `max` length (treeToList (reify1 @g))
 
 flip2Cell :: f :--> g -> g :--> f
 flip2Cell Id2 = Id2
@@ -148,93 +140,18 @@ flip2Cell (Labelled2 n) = Labelled2 (n <> "'")
 flip2Cell (Cmp2 c1 c2) = Cmp2 (flip2Cell c2) (flip2Cell c1)
 flip2Cell (Tensor2 c1 c2) = Tensor2 (flip2Cell c1) (flip2Cell c2)
 
-canonicalize2Cell :: f :--> g -> f :--> g
-canonicalize2Cell Id2 = Id2
-canonicalize2Cell (Labelled2 n) = Labelled2 n
-canonicalize2Cell (Cmp2 c1 c2) = Cmp2 (canonicalize2Cell c1) (canonicalize2Cell c2)
-canonicalize2Cell (Tensor2 (c1 :: f' :--> g') (c2 :: f'' :--> g'')) =
-    (canonicalize2Cell c1 `Tensor2` Id2 @f'') `Cmp2` (Id2 @g' `Tensor2` canonicalize2Cell c2)
-
-
-data Tree1 (f :: [Symbol]) a where
-    TreeNil :: Tree1 Id1 a
-    TreeCons :: (Reify1 f, KnownSymbol s) => Proxy s -> a -> Tree1 f a -> Tree1 (s ': f) a
-
-instance Functor (Tree1 f) where
-    fmap f TreeNil = TreeNil
-    fmap f (TreeCons n x q) = TreeCons n (f x) $ fmap f q
-
-treeToList :: Tree1 f a -> [(String, a)]
-treeToList TreeNil = []
-treeToList (TreeCons n x q) = (symbolVal n, x) : treeToList q
 
 class Reify1 (f :: [Symbol]) where
-    reify1 :: Tree1 f ()
+    reify1 :: [String]
 instance Reify1 '[] where
-    reify1 = TreeNil
+    reify1 = []
 instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
-    reify1 = TreeCons Proxy () (reify1 @f)
+    reify1 = symbolVal (Proxy @s) : reify1 @f
 
-splitTree1 :: forall f g a. Reify1 f => Tree1 (f `Cmp1` g) a -> (Tree1 f a, Tree1 g a)
-splitTree1 t = case (reify1 @f, t) of
-    (TreeNil, t) -> (TreeNil, t)
-    (TreeCons _ () _, TreeCons n x q) ->
-        let (q', q'') = splitTree1 q
-        in (TreeCons n x q', q'')
-
-mergeTree1 :: forall f g a. (Reify1 (f `Cmp1` g)) => Tree1 f a -> Tree1 g a -> Tree1 (f `Cmp1` g) a
-mergeTree1 TreeNil t2 = t2
-mergeTree1 (TreeCons n x q) t2 = case reify1 @(f `Cmp1` g) of
-    TreeCons _ () _ -> TreeCons n x $ mergeTree1 q t2
-
-type PointsFor f = Tree1 f Point
-
-generatePoints :: Reify1 f => Point -> (Point -> Point) -> PointsFor f
-generatePoints init next = snd $ aux init
-    where
-        aux :: forall f. Reify1 f => Point -> (Point, PointsFor f)
-        aux e = case reify1 @f of
-            TreeNil -> (e, TreeNil)
-            TreeCons n () (q :: Tree1 g ()) ->
-                let (new, q') = aux @g e
-                in (next new, TreeCons n new q')
-
-type BoundingBox = (Point, Point)
-
-translatebb :: Rational -> Rational -> BoundingBox -> BoundingBox
-translatebb dx dy (lo, hi) = (translate dx dy lo, translate dx dy hi)
+width1Cell :: forall f. Reify1 f => Int
+width1Cell = length $ reify1 @f
 
 
-centerBdy :: forall f. Reify1 f => (Point, Point) -> PointsFor f -> PointsFor f
-centerBdy (Point _ loy, Point _ hiy) bdy =
-    let pts = treeToList bdy
-        ys = fmap (\(_, Point _ y) -> y) pts
-        (miny, maxy) = (minimum ys, maximum ys)
-     in fmap (translatev (((hiy + loy) - (maxy + miny)) / 2)) bdy
-
-genBoundaries :: forall f g. (Reify1 f, Reify1 g) => (f :--> g) -> (Point, Point) -> (PointsFor f, PointsFor g)
-genBoundaries c p = (centerBdy p $ leftBdy c p, centerBdy p $ rightBdy c p)
-    where
-        defaultBdy :: forall f. Reify1 f => (Point, Point) -> PointsFor f
-        defaultBdy p@(lo, _) = centerBdy p $ generatePoints lo (translatev 1)
-
-        leftBdy :: forall f g. Reify1 f => (f :--> g) -> (Point, Point) -> PointsFor f
-        leftBdy (Cmp2 c1 c2) p0 = leftBdy c1 p0
-        leftBdy (Tensor2 c1 c2) p@(lo, hi) = let
-                mid = translatev (width2Cell c2) lo
-                l1 = leftBdy c1 (mid, hi)
-                l2 = leftBdy c2 (lo, mid)
-            in mergeTree1 l1 l2
-        leftBdy _ p = defaultBdy p
-
-        rightBdy :: forall f g. Reify1 g => (f :--> g) -> (Point, Point) -> PointsFor g
-        rightBdy (Cmp2 c1 c2) p0 = rightBdy c2 p0
-        rightBdy (Tensor2 c1 c2) p@(lo, hi) = let
-                mid = translatev (width2Cell c2) lo
-                r1 = rightBdy c1 (mid, hi)
-                r2 = rightBdy c2 (lo, mid)
-            in mergeTree1 r1 r2
-        rightBdy _ p = defaultBdy p
 
 
 mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
@@ -242,10 +159,8 @@ mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "]
 mkNode p label = "\\node at " <> render p <> " [circle, draw, fill=white] {" <> label <> "};\n"
 
 draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
-draw2Cell c = drawCanon2Cell (Point 0 0) (twoCellToCanonForm c)
+draw2Cell = drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
 
-
-type TwoCellCanonForm = [TwoCellAtom]
 
 data TwoCellAtom = TwoCellAtom {
     before :: Int,
@@ -254,7 +169,6 @@ data TwoCellAtom = TwoCellAtom {
     outputs :: Int,
     label :: Text
 }
-    deriving Eq
 
 totalInputs :: TwoCellAtom -> Int
 totalInputs TwoCellAtom{..} = before + inputs + after
@@ -262,125 +176,34 @@ totalInputs TwoCellAtom{..} = before + inputs + after
 totalOutputs :: TwoCellAtom -> Int
 totalOutputs TwoCellAtom{..} = before + outputs + after
 
+flip2CellAtom :: TwoCellAtom -> TwoCellAtom
+flip2CellAtom ca@TwoCellAtom{..} = ca { inputs = outputs, outputs = inputs }
+
+
+type TwoCellCanonForm = [TwoCellAtom]
+
 tensorCanonForm :: Int -> Int -> TwoCellCanonForm -> TwoCellCanonForm
 tensorCanonForm nbefore nafter = fmap (\ca -> ca {
     before = before ca + nbefore,
     after = after ca + nafter
 })
 
-flip2CellAtom :: TwoCellAtom -> TwoCellAtom
-flip2CellAtom ca@TwoCellAtom{..} = ca { inputs = outputs, outputs = inputs }
-
-typeWidth :: forall f. Reify1 f => Int
-typeWidth = length $ treeToList $ reify1 @f
-
 twoCellToCanonForm :: forall f g. (Reify1 f, Reify1 g) => f :--> g -> TwoCellCanonForm
 twoCellToCanonForm Id2 = twoCellToCanonForm (Labelled2 "id" :: f :--> f)
 twoCellToCanonForm (Labelled2 n) = [TwoCellAtom {
-    before = 0,
-    after = 0,
-    inputs = typeWidth @f,
-    outputs = typeWidth @g,
-    label = n
-}]
+        before = 0,
+        after = 0,
+        inputs = width1Cell @f,
+        outputs = width1Cell @g,
+        label = n
+    }]
 twoCellToCanonForm (Cmp2 c1 c2) = (twoCellToCanonForm c1) ++ (twoCellToCanonForm c2)
 twoCellToCanonForm (Tensor2 (c1 :: f' :--> g') (c2 :: f'' :--> g'')) =
-    (tensorCanonForm 0 (typeWidth @f'') $ twoCellToCanonForm c1)
-    ++ (tensorCanonForm (typeWidth @g') 0 $ twoCellToCanonForm c2)
-
-type TwoCellBoundary = [Rational]
-
-type BdyDelta = (Int, Rational)
-
-constructBoundaries :: TwoCellCanonForm -> [TwoCellBoundary]
-constructBoundaries c = snd $ foldr pushAtom ([], [lastBoundary]) c
-    where
-        lastBoundary = defaultBoundary (totalOutputs (last c))
-
-        defaultBoundary :: Int -> TwoCellBoundary
-        defaultBoundary n = replicate (n+1) baseWidth
-
-        projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
-                ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-        projectBdyL TwoCellAtom{..} bdy =
-            let (bdybefore, (mid, bdyafter)) =
-                    fmap (splitAt (inputs+1)) $ splitAt before bdy
-             in (bdybefore,
-            if inputs == 0
-               then Left (head mid)
-               else Right (head mid, tail $ init mid, last mid),
-            bdyafter)
-        projectBdyR :: TwoCellAtom -> TwoCellBoundary ->
-                ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-        projectBdyR TwoCellAtom{..} bdy =
-            let (bdybefore, (mid, bdyafter)) =
-                    fmap (splitAt (outputs+1)) $ splitAt before bdy
-             in (bdybefore,
-            if outputs == 0
-               then Left (head mid)
-               else Right (head mid, tail $ init mid, last mid),
-            bdyafter)
-
-        propagateDelta :: TwoCellAtom -> BdyDelta -> [BdyDelta]
-        propagateDelta TwoCellAtom{..} (i, delta) =
-            if (inputs == 0 && i == before) || (before < i && i < before + inputs)
-               then [(before, delta/2), (before+outputs, delta/2)]
-            else if i >= before + inputs
-               then [(i - inputs + outputs, delta)]
-            else [(i, delta)]
-
-        applyDelta :: BdyDelta -> TwoCellBoundary -> TwoCellBoundary
-        applyDelta (i, delta) bdy =
-            take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
-
-        deepPropagateDeltas :: [BdyDelta] -> TwoCellCanonForm -> [TwoCellBoundary] -> [TwoCellBoundary]
-        deepPropagateDeltas _ _ [] = []
-        deepPropagateDeltas deltas atoms (bdy:bdys) = newbdy : newbdys
-            where
-                newbdy = foldr applyDelta bdy deltas
-                newbdys = case atoms of
-                    [] -> bdys
-                    (atom:atoms) ->
-                        let newdeltas = concatMap (propagateDelta atom) deltas
-                         in deepPropagateDeltas newdeltas atoms bdys
-
-        backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> (TwoCellBoundary, [BdyDelta])
-        backpropBoundary ca@TwoCellAtom{..} bdy = let
-                (bdybefore, mid, bdyafter) = projectBdyR ca bdy
-                h = case mid of
-                      Left h -> h
-                      Right (x1, mid, x2) -> x1 + sum mid + x2
-                newh = realToFrac (inputs + 1) * baseWidth
-                deltas = if newh > h
-                    then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
-                    else []
-                newmid = if inputs == 0 then [h] else let
-                        newmid = replicate (inputs - 1) baseWidth
-                        (x1, x2) = case mid of
-                            _ | newh > h -> (baseWidth, baseWidth)
-                            Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
-                            Right (x1, mid, x2) -> let
-                                outWidth = sum mid
-                                inWidth = sum newmid
-                              in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
-                    in [x1] ++ newmid ++ [x2]
-            in (bdybefore ++ newmid ++ bdyafter, deltas)
-
-        pushAtom :: TwoCellAtom -> (TwoCellCanonForm, [TwoCellBoundary]) -> (TwoCellCanonForm, [TwoCellBoundary])
-        pushAtom ca (atoms, bdys) = assert (length atoms + 1 == length bdys) $
-            let (bdy, deltas) = backpropBoundary ca (head bdys)
-                bdys' = deepPropagateDeltas deltas atoms bdys
-             in (ca : atoms, bdy : bdys')
-
+    (tensorCanonForm 0 (width1Cell @f'') $ twoCellToCanonForm c1)
+    ++ (tensorCanonForm (width1Cell @g') 0 $ twoCellToCanonForm c2)
 
 twoCellLength :: Rational
 twoCellLength = 1
-
-baseWidth :: Rational
-baseWidth = 1
-
-evalRWS' :: r -> s -> RWS r w s a -> w
-evalRWS' r s rws = snd $ evalRWS rws r s
 
 draw2CellAtom :: Point -> TwoCellBoundary -> TwoCellBoundary -> TwoCellAtom -> Text
 draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
@@ -420,13 +243,116 @@ draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
             p2 <- popright
             tell $ mkLine "0" "180" p1 p2
 
-drawCanon2Cell :: Point -> TwoCellCanonForm -> Text
-drawCanon2Cell p c = let
-    bdys = constructBoundaries c
-    in evalRWS' () (p, bdys) $ forM_ c $ \ca -> do
-            (p, bdys) <- get
-            tell $ draw2CellAtom p (head bdys) (head $ tail bdys) ca
-            put (translateh twoCellLength p, tail bdys)
-       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- treeToList ptsf ]
-       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- treeToList ptsg ]
+
+type TwoCellBoundary = [Rational]
+
+baseWidth :: Rational
+baseWidth = 1
+
+defaultBoundary :: Int -> TwoCellBoundary
+defaultBoundary n = replicate (n+1) baseWidth
+
+projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
+        ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
+projectBdyL = projectBdyR . flip2CellAtom
+
+projectBdyR :: TwoCellAtom -> TwoCellBoundary ->
+        ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
+projectBdyR TwoCellAtom{..} bdy =
+    let (bdybefore, (mid, bdyafter)) =
+            fmap (splitAt (outputs+1)) $ splitAt before bdy
+     in (bdybefore,
+        if outputs == 0
+           then Left (head mid)
+           else Right (head mid, tail $ init mid, last mid),
+        bdyafter)
+
+
+type BdyDelta = (Int, Rational)
+
+propagateDelta :: TwoCellAtom -> BdyDelta -> [BdyDelta]
+propagateDelta TwoCellAtom{..} (i, delta) =
+    if (inputs == 0 && i == before) || (before < i && i < before + inputs)
+       then [(before, delta/2), (before+outputs, delta/2)]
+    else if i >= before + inputs
+       then [(i - inputs + outputs, delta)]
+    else [(i, delta)]
+
+applyDelta :: BdyDelta -> TwoCellBoundary -> TwoCellBoundary
+applyDelta (i, delta) bdy =
+    take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
+
+backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> (TwoCellBoundary, [BdyDelta])
+backpropBoundary ca@TwoCellAtom{..} bdy = let
+        (bdybefore, mid, bdyafter) = projectBdyR ca bdy
+        h = case mid of
+              Left h -> h
+              Right (x1, mid, x2) -> x1 + sum mid + x2
+        newh = realToFrac (inputs + 1) * baseWidth
+        deltas = if newh > h
+            then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
+            else []
+        newmid = if inputs == 0 then [h] else let
+                newmid = replicate (inputs - 1) baseWidth
+                (x1, x2) = case mid of
+                    _ | newh > h -> (baseWidth, baseWidth)
+                    Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
+                    Right (x1, mid, x2) -> let
+                        outWidth = sum mid
+                        inWidth = sum newmid
+                      in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
+            in [x1] ++ newmid ++ [x2]
+    in (bdybefore ++ newmid ++ bdyafter, deltas)
+
+
+data LayedOut2Cell =
+    NilLO2C TwoCellBoundary
+      | ConsLO2C TwoCellBoundary TwoCellAtom LayedOut2Cell
+
+makeEmptyLO2C :: Int -> LayedOut2Cell
+makeEmptyLO2C n = NilLO2C $ defaultBoundary n
+
+headLO2C :: LayedOut2Cell -> TwoCellBoundary
+headLO2C (NilLO2C bdy) = bdy
+headLO2C (ConsLO2C bdy _ _) = bdy
+
+tailLO2C :: LayedOut2Cell -> TwoCellBoundary
+tailLO2C (NilLO2C bdy) = bdy
+tailLO2C (ConsLO2C _ _ q) = tailLO2C q
+
+iterLO2C :: LayedOut2Cell -> [(TwoCellBoundary, TwoCellAtom, TwoCellBoundary)]
+iterLO2C (NilLO2C bdy) = []
+iterLO2C (ConsLO2C bdy atom (NilLO2C bdy')) = [(bdy, atom, bdy')]
+iterLO2C (ConsLO2C bdy atom q@(ConsLO2C bdy' _ _)) = (bdy, atom, bdy') : iterLO2C q
+
+unpackLO2C :: LayedOut2Cell -> (TwoCellCanonForm, [TwoCellBoundary])
+unpackLO2C (NilLO2C bdy) = ([], [bdy])
+unpackLO2C (ConsLO2C bdy atom q) = let (atoms, bdys) = unpackLO2C q in (atom:atoms, bdy:bdys)
+
+applyDeltasLO2C :: [BdyDelta] -> LayedOut2Cell -> LayedOut2Cell
+applyDeltasLO2C _ c@(NilLO2C []) = c
+applyDeltasLO2C deltas (NilLO2C bdy) = NilLO2C $ foldr applyDelta bdy deltas
+applyDeltasLO2C deltas (ConsLO2C bdy atom q) = ConsLO2C newbdy atom $ applyDeltasLO2C newdeltas q
+    where
+        newbdy = foldr applyDelta bdy deltas
+        newdeltas = concatMap (propagateDelta atom) deltas
+
+pushAtomLO2C :: TwoCellAtom -> LayedOut2Cell -> LayedOut2Cell
+pushAtomLO2C atom c =
+    let (bdy, deltas) = backpropBoundary atom (headLO2C c)
+     in ConsLO2C bdy atom $ applyDeltasLO2C deltas c
+
+layOut2Cell :: TwoCellCanonForm -> LayedOut2Cell
+layOut2Cell c = foldr pushAtomLO2C initLOC c
+    where
+        initLOC = makeEmptyLO2C (totalOutputs (last c))
+
+drawLO2C :: Point -> LayedOut2Cell -> Text
+drawLO2C p c = evalRWS' () p $ forM_ (iterLO2C c) $
+        \(bdyl, atom, bdyr) -> do
+            p <- get
+            tell $ draw2CellAtom p bdyl bdyr atom
+            put (translateh twoCellLength p)
+       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- headLO2C c ]
+       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- tailLO2C c ]
 
