@@ -7,7 +7,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Promotion.Prelude.List
 import Data.Proxy
-import Control.Monad.State.Class
+import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
 import Control.Exception.Base (assert)
@@ -151,7 +151,10 @@ instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
 width1Cell :: forall f. Reify1 f => Int
 width1Cell = length $ reify1 @f
 
+type OneCellRep = [Text]
 
+oneCellRep :: forall f. Reify1 f => OneCellRep
+oneCellRep = fmap T.pack $ reify1 @f
 
 
 mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
@@ -167,6 +170,8 @@ data TwoCellAtom = TwoCellAtom {
     after :: Int,
     inputs :: Int,
     outputs :: Int,
+    inRep :: OneCellRep,
+    outRep :: OneCellRep,
     label :: Text
 }
 
@@ -195,6 +200,8 @@ twoCellToCanonForm (Labelled2 n) = [TwoCellAtom {
         after = 0,
         inputs = width1Cell @f,
         outputs = width1Cell @g,
+        inRep = oneCellRep @f,
+        outRep = oneCellRep @g,
         label = n
     }]
 twoCellToCanonForm (Cmp2 c1 c2) = (twoCellToCanonForm c1) ++ (twoCellToCanonForm c2)
@@ -252,6 +259,25 @@ baseWidth = 1
 defaultBoundary :: Int -> TwoCellBoundary
 defaultBoundary n = replicate (n+1) baseWidth
 
+backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> TwoCellBoundary
+backpropBoundary ca@TwoCellAtom{..} bdy = let
+        (bdybefore, mid, bdyafter) = projectBdyR ca bdy
+        h = case mid of
+              Left h -> h
+              Right (x1, mid, x2) -> x1 + sum mid + x2
+        newh = realToFrac (inputs + 1) * baseWidth
+        newmid = if inputs == 0 then [h] else let
+                newmid = replicate (inputs - 1) baseWidth
+                (x1, x2) = case mid of
+                    _ | newh > h -> (baseWidth, baseWidth)
+                    Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
+                    Right (x1, mid, x2) -> let
+                        outWidth = sum mid
+                        inWidth = sum newmid
+                      in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
+            in [x1] ++ newmid ++ [x2]
+    in bdybefore ++ newmid ++ bdyafter
+
 projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
         ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
 projectBdyL = projectBdyR . flip2CellAtom
@@ -282,27 +308,13 @@ applyDelta :: BdyDelta -> TwoCellBoundary -> TwoCellBoundary
 applyDelta (i, delta) bdy =
     take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
-backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> (TwoCellBoundary, [BdyDelta])
-backpropBoundary ca@TwoCellAtom{..} bdy = let
-        (bdybefore, mid, bdyafter) = projectBdyR ca bdy
-        h = case mid of
-              Left h -> h
-              Right (x1, mid, x2) -> x1 + sum mid + x2
-        newh = realToFrac (inputs + 1) * baseWidth
-        deltas = if newh > h
-            then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
-            else []
-        newmid = if inputs == 0 then [h] else let
-                newmid = replicate (inputs - 1) baseWidth
-                (x1, x2) = case mid of
-                    _ | newh > h -> (baseWidth, baseWidth)
-                    Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
-                    Right (x1, mid, x2) -> let
-                        outWidth = sum mid
-                        inWidth = sum newmid
-                      in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
-            in [x1] ++ newmid ++ [x2]
-    in (bdybefore ++ newmid ++ bdyafter, deltas)
+backpropDelta :: TwoCellAtom -> TwoCellBoundary -> [BdyDelta]
+backpropDelta TwoCellAtom{..} bdy = let
+        h = sum $ take (outputs+1) $ drop before bdy
+        newh = realToFrac (inputs+1) * baseWidth
+     in if newh > h
+        then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
+        else []
 
 
 data LayedOut2Cell =
@@ -325,27 +337,22 @@ iterLO2C (NilLO2C bdy) = []
 iterLO2C (ConsLO2C bdy atom (NilLO2C bdy')) = [(bdy, atom, bdy')]
 iterLO2C (ConsLO2C bdy atom q@(ConsLO2C bdy' _ _)) = (bdy, atom, bdy') : iterLO2C q
 
-unpackLO2C :: LayedOut2Cell -> (TwoCellCanonForm, [TwoCellBoundary])
-unpackLO2C (NilLO2C bdy) = ([], [bdy])
-unpackLO2C (ConsLO2C bdy atom q) = let (atoms, bdys) = unpackLO2C q in (atom:atoms, bdy:bdys)
-
-applyDeltasLO2C :: [BdyDelta] -> LayedOut2Cell -> LayedOut2Cell
-applyDeltasLO2C _ c@(NilLO2C []) = c
-applyDeltasLO2C deltas (NilLO2C bdy) = NilLO2C $ foldr applyDelta bdy deltas
-applyDeltasLO2C deltas (ConsLO2C bdy atom q) = ConsLO2C newbdy atom $ applyDeltasLO2C newdeltas q
-    where
-        newbdy = foldr applyDelta bdy deltas
-        newdeltas = concatMap (propagateDelta atom) deltas
-
-pushAtomLO2C :: TwoCellAtom -> LayedOut2Cell -> LayedOut2Cell
-pushAtomLO2C atom c =
-    let (bdy, deltas) = backpropBoundary atom (headLO2C c)
-     in ConsLO2C bdy atom $ applyDeltasLO2C deltas c
-
 layOut2Cell :: TwoCellCanonForm -> LayedOut2Cell
-layOut2Cell c = foldr pushAtomLO2C initLOC c
+layOut2Cell c = propagateDeltasLO2C [] $ foldr pushAtomLO2C initLOC c
     where
         initLOC = makeEmptyLO2C (totalOutputs (last c))
+
+        propagateDeltasLO2C :: [BdyDelta] -> LayedOut2Cell -> LayedOut2Cell
+        propagateDeltasLO2C deltas (NilLO2C bdy) = NilLO2C $ foldr applyDelta bdy deltas
+        propagateDeltasLO2C deltas (ConsLO2C bdy atom q) = ConsLO2C newbdy atom $ propagateDeltasLO2C newdeltas q
+            where
+                newbdy = foldr applyDelta bdy deltas
+                newdeltas = concatMap (propagateDelta atom) deltas ++ backpropDelta atom (headLO2C q)
+
+        pushAtomLO2C :: TwoCellAtom -> LayedOut2Cell -> LayedOut2Cell
+        pushAtomLO2C atom c =
+            let bdy = backpropBoundary atom (headLO2C c)
+             in ConsLO2C bdy atom c
 
 drawLO2C :: Point -> LayedOut2Cell -> Text
 drawLO2C p c = evalRWS' () p $ forM_ (iterLO2C c) $
