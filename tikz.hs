@@ -26,9 +26,10 @@ data Composite f a b where
     NilCte :: Composite f a a
     CmpCte :: f a b -> Composite f b c -> Composite f a c
 
-headComposite :: Composite f a b -> (forall c. f a c -> r) -> r -> r
-headComposite NilCte _ x = x
-headComposite (CmpCte fab _) f _ = f fab
+lastComposite :: Composite f a b -> (forall c. f c b -> r b) -> r b -> r b
+lastComposite NilCte _ x = x
+lastComposite (CmpCte fab NilCte) f _ = f fab
+lastComposite (CmpCte _ q) f x = lastComposite q f x
 
 foldComposite :: (forall a b c. f a b -> r b c -> r a c) -> r b b -> Composite f a b -> r a b
 foldComposite _ x NilCte = x
@@ -50,9 +51,9 @@ headInterleaved :: Interleaved f g a b -> g a
 headInterleaved (NilIntl ga) = ga
 headInterleaved (CmpIntl ga _ _) = ga
 
-tailInterleaved :: Interleaved f g a b -> g b
-tailInterleaved (NilIntl ga) = ga
-tailInterleaved (CmpIntl _ _ q) = tailInterleaved q
+lastInterleaved :: Interleaved f g a b -> g b
+lastInterleaved (NilIntl ga) = ga
+lastInterleaved (CmpIntl _ _ q) = lastInterleaved q
 
 iterInterleaved :: Interleaved f g a b -> (forall a b. (g a, f a b, g b) -> r) -> [r]
 iterInterleaved (NilIntl ga) f = []
@@ -93,8 +94,8 @@ theBody = do
                 gamma = labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
                 delta = labelled2 "$\\delta$" :: H :--> Id1
                 eta = labelled2 "$\\eta$" :: F :--> Id1
-                mu = labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
-                nu = labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
+                mu = labelled2 "$\\mu$" :: (G `Cmp1` G) :--> H
+                nu = labelled2 "$\\nu$" :: H :--> (G `Cmp1` G)
                 omega = labelled2 "$\\omega$" :: Id1 :--> (F `Cmp1` F)
                 epsilon = labelled2 "$\\epsilon$" :: G :--> G
                 x = omega
@@ -108,21 +109,19 @@ theBody = do
                 `Tensor2` x `Tensor2` id2 @G) `Cmp2` mu)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                beta = labelled2 "$\\beta$" :: F :--> (F `Cmp1` G)
-                gamma = labelled2 "$\\gamma$" :: G :--> H
-                eta = labelled2 "$\\eta$" :: F :--> Id1
-            in beta `Cmp2` (eta `Tensor2` gamma)
+                beta = labelled2 "$\\beta$" :: (F `Cmp1` F) :--> (F `Cmp1` G)
+                gamma = labelled2 "$\\gamma$" :: G :--> (G `Cmp1` G `Cmp1` G `Cmp1` H)
+                eta = labelled2 "$\\eta$" :: F :--> (F `Cmp1` F `Cmp1` F)
+                pi = labelled2 "$\\pi$" :: F :--> (F `Cmp1` F)
+                rho = labelled2 "$\\rho$" :: (F `Cmp1` F) :--> Id1
+            in beta `Cmp2` ((eta `Cmp2` (id2 @F `Tensor2` (pi `Cmp2` rho) `Tensor2` id2 @F)) `Tensor2` gamma)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                beta = labelled2 "$\\beta$" :: F :--> (F `Cmp1` G `Cmp1` H)
+                beta = labelled2 "$\\beta$" :: (F `Cmp1` G `Cmp1` H) :--> (F `Cmp1` G `Cmp1` H)
                 gamma = labelled2 "$\\gamma$" :: G :--> F
-                delta = labelled2 "$\\delta$" :: H :--> Id1
-                eta = labelled2 "$\\eta$" :: F :--> Id1
-                omega = labelled2 "$\\omega$" :: Id1 :--> F
-                x = beta
-                    `Cmp2` (eta `Tensor2` gamma `Tensor2` delta)
-                    `Cmp2` eta
-            in x
+                delta = labelled2 "$\\delta$" :: H :--> H
+                eta = labelled2 "$\\eta$" :: F :--> G
+            in beta `Cmp2` (eta `Tensor2` (gamma `Cmp2` eta) `Tensor2` delta)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
                 beta = labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
@@ -245,17 +244,18 @@ totalOutputs TwoCellAtom{..} = before + outputs + after
 flip2CellAtom :: TwoCellAtom f g -> TwoCellAtom g f
 flip2CellAtom ca@TwoCellAtom{..} = ca { inputs = outputs, outputs = inputs }
 
--- coerce2CellAtom :: forall f' g' f g. TwoCellAtom f g -> TwoCellAtom f' g'
--- coerce2CellAtom x = x { inputs = inputs x }
-
 tensor2CellAtomL :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (x `Cmp1` f) (x `Cmp1` g)
 tensor2CellAtomL sx ca = ca {
-        before = before ca + length sx
+        before = before ca + length sx,
+        inRep = sx ++ inRep ca,
+        outRep = sx ++ outRep ca
     }
 
 tensor2CellAtomR :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (f `Cmp1` x) (g `Cmp1` x)
 tensor2CellAtomR sx ca = ca {
-        after = after ca + length sx
+        after = after ca + length sx,
+        inRep = inRep ca ++ sx,
+        outRep = outRep ca ++ sx
     }
 
 
@@ -332,13 +332,16 @@ draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
             tell $ mkLine "0" "180" p1 p2
 
 
-data TwoCellBoundary f = Bdy { unBdy :: [Rational] }
+data TwoCellBoundary f = Bdy {
+    repBdy :: Sing f,
+    unBdy :: [Rational]
+}
 
 baseWidth :: Rational
 baseWidth = 1
 
-defaultBoundary :: Int -> TwoCellBoundary f
-defaultBoundary n = Bdy $ replicate (n+1) baseWidth
+defaultBoundary :: TwoCellAtom f g -> TwoCellBoundary g
+defaultBoundary ca = Bdy (outRep ca) $ replicate (totalOutputs ca+1) baseWidth
 
 backpropBoundary :: TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBoundary f
 backpropBoundary ca@TwoCellAtom{..} bdy = let
@@ -357,7 +360,7 @@ backpropBoundary ca@TwoCellAtom{..} bdy = let
                         inWidth = sum newmid
                       in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
             in [x1] ++ newmid ++ [x2]
-    in Bdy $ bdybefore ++ newmid ++ bdyafter
+    in Bdy inRep $ bdybefore ++ newmid ++ bdyafter
 
 projectBdyL :: TwoCellAtom f g -> TwoCellBoundary f ->
         ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
@@ -386,8 +389,8 @@ propagateDelta TwoCellAtom{..} (i, delta) =
     else [(i, delta)]
 
 applyDelta :: BdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
-applyDelta (i, delta) (unBdy -> bdy) =
-    Bdy $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
+applyDelta (i, delta) (Bdy sf bdy) =
+    Bdy sf $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
 backpropDelta :: TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
 backpropDelta TwoCellAtom{..} (unBdy -> bdy) = let
@@ -400,16 +403,16 @@ backpropDelta TwoCellAtom{..} (unBdy -> bdy) = let
 
 type LayedOut2Cell = Interleaved TwoCellAtom TwoCellBoundary
 
-layOut2Cell :: TwoCellCanonForm f g -> LayedOut2Cell f g
+layOut2Cell :: forall f g. TwoCellCanonForm f g -> LayedOut2Cell f g
 layOut2Cell c = propagateDeltasLO2C [] $ interleaveInComposite backpropBoundary lastBdy c
     where
-        lastBdy :: forall f. TwoCellBoundary f
-        lastBdy = defaultBoundary (headComposite c totalOutputs 0)
+        lastBdy :: TwoCellBoundary g
+        lastBdy = lastComposite c defaultBoundary undefined
 
-        applyDeltas :: [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
+        applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
         applyDeltas = flip $ foldr applyDelta
 
-        propagateAndAccumulateDeltas :: [BdyDelta f] -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
+        propagateAndAccumulateDeltas :: forall f g. [BdyDelta f] -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
         propagateAndAccumulateDeltas deltas atom bdy =
             concatMap (propagateDelta atom) deltas ++ backpropDelta atom bdy
 
@@ -422,11 +425,18 @@ layOut2Cell c = propagateDeltasLO2C [] $ interleaveInComposite backpropBoundary 
                 newdeltas = propagateAndAccumulateDeltas deltas atom (headInterleaved q)
 
 drawLO2C :: Point -> LayedOut2Cell f g -> Text
-drawLO2C p c = evalRWS' () p $ sequence_ (iterInterleaved c $ \(bdyl, atom, bdyr) -> do
-            p <- get
-            tell $ draw2CellAtom p bdyl bdyr atom
-            put (translateh twoCellLength p)
-        )
-       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- headInterleaved c ]
-       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- tailInterleaved c ]
+drawLO2C p0 c =
+    let (pend, output) = (\x -> execRWS x () p0) $ sequence_
+            (iterInterleaved c $ \(bdyl, atom, bdyr) -> do
+                p <- get
+                tell $ draw2CellAtom p bdyl bdyr atom
+                put (translateh twoCellLength p)
+            )
+    in output
+       <> drawBdyLabels (headInterleaved c) p0 "east"
+       <> drawBdyLabels (lastInterleaved c) pend "west"
+    where
+        drawBdyLabels (Bdy rep bdy) p0 dir =
+            T.unlines [ mkLabel p dir n |
+                (n, p) <- zip rep (tail $ scanl (flip translatev) p0 bdy) ]
 
