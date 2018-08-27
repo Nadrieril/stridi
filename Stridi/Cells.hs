@@ -12,7 +12,7 @@ import Data.Text (Text)
 
 type A1Cell = [Symbol]
 type Id1 = '[]
-type Cmp1 a b = a :++ b
+type Cmp1 a b = a ++ b
 
 
 type Sing (f :: [Symbol]) = [Text]
@@ -51,3 +51,5 @@ labelled2 l = Labelled2 l (reify1 @f) (reify1 @g)
 id2 :: forall f. Reify1 f => f :--> f
 id2 = Id2 (reify1 @f)
 
+seal2Cell :: Text -> f :--> g -> f :--> g
+seal2Cell s c = Labelled2 s (extractLeftRep c) (extractLeftRep (flip2Cell c))
