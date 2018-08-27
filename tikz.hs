@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, LambdaCase, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
-    RecordWildCards, AllowAmbiguousTypes #-}
+    RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
 import GHC.TypeLits
 import Data.List (intersperse)
 import qualified Data.Text as T
@@ -21,6 +21,57 @@ import Text.LaTeX.Base.Class
 evalRWS' :: r -> s -> RWS r w s a -> w
 evalRWS' r s rws = snd $ evalRWS rws r s
 
+
+data Composite f a b where
+    NilCte :: Composite f a a
+    CmpCte :: f a b -> Composite f b c -> Composite f a c
+
+headComposite :: Composite f a b -> (forall c. f a c -> r) -> r -> r
+headComposite NilCte _ x = x
+headComposite (CmpCte fab _) f _ = f fab
+
+foldComposite :: (forall a b c. f a b -> r b c -> r a c) -> r b b -> Composite f a b -> r a b
+foldComposite _ x NilCte = x
+foldComposite f x (CmpCte fab q) = f fab (foldComposite f x q)
+
+mergeComposite :: Composite f a b -> Composite f b c -> Composite f a c
+mergeComposite NilCte fbc = fbc
+mergeComposite (CmpCte fab q) fbc = CmpCte fab $ mergeComposite q fbc
+
+singComposite :: f a b -> Composite f a b
+singComposite fab = CmpCte fab NilCte
+
+
+data Interleaved f g a b where
+    NilIntl :: g a -> Interleaved f g a a
+    CmpIntl :: g a -> f a b -> Interleaved f g b c -> Interleaved f g a c
+
+headInterleaved :: Interleaved f g a b -> g a
+headInterleaved (NilIntl ga) = ga
+headInterleaved (CmpIntl ga _ _) = ga
+
+tailInterleaved :: Interleaved f g a b -> g b
+tailInterleaved (NilIntl ga) = ga
+tailInterleaved (CmpIntl _ _ q) = tailInterleaved q
+
+iterInterleaved :: Interleaved f g a b -> (forall a b. (g a, f a b, g b) -> r) -> [r]
+iterInterleaved (NilIntl ga) f = []
+iterInterleaved (CmpIntl ga fab (NilIntl gb)) f = [f (ga, fab, gb)]
+iterInterleaved (CmpIntl ga fab q@(CmpIntl gb _ _)) f = f (ga, fab, gb) : iterInterleaved q f
+
+-- scanInterleaved :: (forall a b. (g a, f a b, g' b) -> (g' a, f' a b)) -> (forall a. g a -> g' a)
+--                 -> Interleaved f g a b -> Interleaved f' g' a b
+-- scanInterleaved map end (NilIntl ga) = NilIntl $ end ga
+-- scanInterleaved map end (CmpIntl ga fab q) =
+--     let q' = scanInterleaved map end q
+--         (ga', fab') = map (ga, fab, headInterleaved q')
+--      in CmpIntl ga' fab' q'
+
+interleaveInComposite :: (forall a b c. f a b -> g b -> g a) -> g b -> Composite f a b -> Interleaved f g a b
+interleaveInComposite f x = foldComposite (\fab intbc -> CmpIntl (f fab (headInterleaved intbc)) fab intbc) (NilIntl x)
+
+
+
 main :: IO ()
 main = execLaTeXT theBody >>= TIO.putStrLn . render
 
@@ -37,15 +88,15 @@ theBody = do
     "Another string diagram"
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                alpha = Labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F
-                beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
-                gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
-                delta = Labelled2 "$\\delta$" :: H :--> Id1
-                eta = Labelled2 "$\\eta$" :: F :--> Id1
-                mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
-                nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
-                omega = Labelled2 "$\\omega$" :: Id1 :--> (F `Cmp1` F)
-                epsilon = Labelled2 "$\\epsilon$" :: G :--> G
+                alpha = labelled2 "$\\alpha$" :: (F `Cmp1` F) :--> F
+                beta = labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
+                gamma = labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
+                delta = labelled2 "$\\delta$" :: H :--> Id1
+                eta = labelled2 "$\\eta$" :: F :--> Id1
+                mu = labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
+                nu = labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
+                omega = labelled2 "$\\omega$" :: Id1 :--> (F `Cmp1` F)
+                epsilon = labelled2 "$\\epsilon$" :: G :--> G
                 x = omega
                     `Cmp2` alpha
                     `Cmp2` beta
@@ -54,48 +105,48 @@ theBody = do
                         :: Id1 :--> Id1
             in
             (nu `Cmp2`((epsilon `Cmp2` epsilon)
-                `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
+                `Tensor2` x `Tensor2` id2 @G) `Cmp2` mu)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                beta = Labelled2 "$\\beta$" :: F :--> (F `Cmp1` G)
-                gamma = Labelled2 "$\\gamma$" :: G :--> H
-                eta = Labelled2 "$\\eta$" :: F :--> Id1
+                beta = labelled2 "$\\beta$" :: F :--> (F `Cmp1` G)
+                gamma = labelled2 "$\\gamma$" :: G :--> H
+                eta = labelled2 "$\\eta$" :: F :--> Id1
             in beta `Cmp2` (eta `Tensor2` gamma)
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                beta = Labelled2 "$\\beta$" :: F :--> (F `Cmp1` G `Cmp1` H)
-                gamma = Labelled2 "$\\gamma$" :: G :--> F
-                delta = Labelled2 "$\\delta$" :: H :--> Id1
-                eta = Labelled2 "$\\eta$" :: F :--> Id1
-                omega = Labelled2 "$\\omega$" :: Id1 :--> F
+                beta = labelled2 "$\\beta$" :: F :--> (F `Cmp1` G `Cmp1` H)
+                gamma = labelled2 "$\\gamma$" :: G :--> F
+                delta = labelled2 "$\\delta$" :: H :--> Id1
+                eta = labelled2 "$\\eta$" :: F :--> Id1
+                omega = labelled2 "$\\omega$" :: Id1 :--> F
                 x = beta
                     `Cmp2` (eta `Tensor2` gamma `Tensor2` delta)
                     `Cmp2` eta
             in x
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                beta = Labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
-                gamma = Labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
-                delta = Labelled2 "$\\delta$" :: H :--> Id1
-                eta = Labelled2 "$\\eta$" :: F :--> Id1
-                mu = Labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
-                nu = Labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
-                omega = Labelled2 "$\\omega$" :: Id1 :--> F
+                beta = labelled2 "$\\beta$" :: F :--> (G `Cmp1` H `Cmp1` H)
+                gamma = labelled2 "$\\gamma$" :: (G `Cmp1` H) :--> F
+                delta = labelled2 "$\\delta$" :: H :--> Id1
+                eta = labelled2 "$\\eta$" :: F :--> Id1
+                mu = labelled2 "$\\mu$" :: (G `Cmp1` G) :--> Id1
+                nu = labelled2 "$\\nu$" :: Id1 :--> (G `Cmp1` G)
+                omega = labelled2 "$\\omega$" :: Id1 :--> F
                 x = omega
                     `Cmp2` beta
                     `Cmp2` (gamma `Tensor2` delta)
                     `Cmp2` eta
                         :: Id1 :--> Id1
             in
-            (nu `Cmp2` (Id2 @G `Tensor2` x `Tensor2` Id2 @G) `Cmp2` mu)
+            (nu `Cmp2` (id2 @G `Tensor2` x `Tensor2` id2 @G) `Cmp2` mu)
     "Another string diagram"
     center $ fromLaTeX $ TeXEnv "tikzpicture" [] $
         raw $ draw2Cell $ let
-                alpha = Labelled2 "$\\beta$" :: Id1 :--> (F `Cmp1` G)
-                beta = Labelled2 "$\\alpha$" :: (F `Cmp1` G) :--> Id1
-                circle = Id2 @H `Tensor2` (alpha `Cmp2` beta) `Tensor2` Id2 @H
+                alpha = labelled2 "$\\beta$" :: Id1 :--> (F `Cmp1` G)
+                beta = labelled2 "$\\alpha$" :: (F `Cmp1` G) :--> Id1
+                circle = id2 @H `Tensor2` (alpha `Cmp2` beta) `Tensor2` id2 @H
             in
-            circle `Cmp2` (Id2 @H `Tensor2` Id2 @H) `Cmp2` flip2Cell circle
+            circle `Cmp2` (id2 @H `Tensor2` id2 @H) `Cmp2` flip2Cell circle
     "End of "
     hatex
 
@@ -127,93 +178,123 @@ type G = '["$G$"]
 type H = '["$H$"]
 
 
+type Sing (f :: [Symbol]) = [Text]
+
 data (f :: A1Cell) :--> (g :: A1Cell) where
-    Labelled2 :: (Reify1 f, Reify1 g) => Text -> f :--> g
-    Id2 :: Reify1 f => f :--> f
-    Cmp2 :: (Reify1 f, Reify1 g, Reify1 h) => (f :--> g) -> (g :--> h) -> (f :--> h)
-    Tensor2 :: (Reify1 f, Reify1 g, Reify1 f', Reify1 g') =>
-        (f :--> g) -> (f' :--> g') -> (Cmp1 f f' :--> Cmp1 g g')
+    Labelled2 :: Text -> Sing f -> Sing g -> f :--> g
+    Id2 :: Sing f -> f :--> f
+    Cmp2 :: (f :--> g) -> (g :--> h) -> (f :--> h)
+    Tensor2 :: (f :--> g) -> (f' :--> g') -> (Cmp1 f f' :--> Cmp1 g g')
 
 flip2Cell :: f :--> g -> g :--> f
-flip2Cell Id2 = Id2
-flip2Cell (Labelled2 n) = Labelled2 (n <> "'")
+flip2Cell (Id2 sf) = Id2 sf
+flip2Cell (Labelled2 n sf sg) = Labelled2 (n <> "'") sg sf
 flip2Cell (Cmp2 c1 c2) = Cmp2 (flip2Cell c2) (flip2Cell c1)
 flip2Cell (Tensor2 c1 c2) = Tensor2 (flip2Cell c1) (flip2Cell c2)
 
+extractLeftRep :: f :--> g -> Sing f
+extractLeftRep (Id2 sf) = sf
+extractLeftRep (Labelled2 _ sf _) = sf
+extractLeftRep (Cmp2 c1 _) = extractLeftRep c1
+extractLeftRep (Tensor2 c1 c2) = let
+        r1 = extractLeftRep c1
+        r2 = extractLeftRep c2
+    in r1 ++ r2
 
 class Reify1 (f :: [Symbol]) where
-    reify1 :: [String]
+    reify1 :: Sing f
 instance Reify1 '[] where
     reify1 = []
 instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
-    reify1 = symbolVal (Proxy @s) : reify1 @f
+    reify1 = T.pack (symbolVal (Proxy @s)) : reify1 @f
 
-width1Cell :: forall f. Reify1 f => Int
-width1Cell = length $ reify1 @f
+labelled2 :: forall f g. (Reify1 f, Reify1 g) => Text -> f :--> g
+labelled2 l = Labelled2 l (reify1 @f) (reify1 @g)
 
-type OneCellRep = [Text]
+id2 :: forall f. Reify1 f => f :--> f
+id2 = Id2 (reify1 @f)
 
-oneCellRep :: forall f. Reify1 f => OneCellRep
-oneCellRep = fmap T.pack $ reify1 @f
 
 
 mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
 mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};\n"
 mkNode p label = "\\node at " <> render p <> " [circle, draw, fill=white] {" <> label <> "};\n"
 
-draw2Cell :: (Reify1 f, Reify1 g) => (f :--> g) -> Text
+draw2Cell :: (f :--> g) -> Text
 draw2Cell = drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
 
 
-data TwoCellAtom = TwoCellAtom {
+
+
+data TwoCellAtom f g = TwoCellAtom {
     before :: Int,
     after :: Int,
     inputs :: Int,
     outputs :: Int,
-    inRep :: OneCellRep,
-    outRep :: OneCellRep,
+    inRep :: Sing f,
+    outRep :: Sing g,
     label :: Text
 }
 
-totalInputs :: TwoCellAtom -> Int
+totalInputs :: TwoCellAtom f g -> Int
 totalInputs TwoCellAtom{..} = before + inputs + after
 
-totalOutputs :: TwoCellAtom -> Int
+totalOutputs :: TwoCellAtom f g -> Int
 totalOutputs TwoCellAtom{..} = before + outputs + after
 
-flip2CellAtom :: TwoCellAtom -> TwoCellAtom
+flip2CellAtom :: TwoCellAtom f g -> TwoCellAtom g f
 flip2CellAtom ca@TwoCellAtom{..} = ca { inputs = outputs, outputs = inputs }
 
+-- coerce2CellAtom :: forall f' g' f g. TwoCellAtom f g -> TwoCellAtom f' g'
+-- coerce2CellAtom x = x { inputs = inputs x }
 
-type TwoCellCanonForm = [TwoCellAtom]
+tensor2CellAtomL :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (x `Cmp1` f) (x `Cmp1` g)
+tensor2CellAtomL sx ca = ca {
+        before = before ca + length sx
+    }
 
-tensorCanonForm :: Int -> Int -> TwoCellCanonForm -> TwoCellCanonForm
-tensorCanonForm nbefore nafter = fmap (\ca -> ca {
-    before = before ca + nbefore,
-    after = after ca + nafter
-})
+tensor2CellAtomR :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (f `Cmp1` x) (g `Cmp1` x)
+tensor2CellAtomR sx ca = ca {
+        after = after ca + length sx
+    }
 
-twoCellToCanonForm :: forall f g. (Reify1 f, Reify1 g) => f :--> g -> TwoCellCanonForm
-twoCellToCanonForm Id2 = twoCellToCanonForm (Labelled2 "id" :: f :--> f)
-twoCellToCanonForm (Labelled2 n) = [TwoCellAtom {
+
+type TwoCellCanonForm = Composite TwoCellAtom
+
+tensorCanonFormL :: forall x f g. Sing x -> TwoCellCanonForm f g -> TwoCellCanonForm (x `Cmp1` f) (x `Cmp1` g)
+tensorCanonFormL sx NilCte = NilCte
+tensorCanonFormL sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomL @x sx atom) $ tensorCanonFormL @x sx q
+
+tensorCanonFormR :: forall x f g. Sing x -> TwoCellCanonForm f g -> TwoCellCanonForm (f `Cmp1` x) (g `Cmp1` x)
+tensorCanonFormR sx NilCte = NilCte
+tensorCanonFormR sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomR @x sx atom) $ tensorCanonFormR @x sx q
+
+twoCellToCanonForm :: f :--> g -> TwoCellCanonForm f g
+twoCellToCanonForm (Id2 sf) = twoCellToCanonForm (Labelled2 "id" sf sf)
+twoCellToCanonForm (Labelled2 n sf sg) = singComposite $ TwoCellAtom {
         before = 0,
         after = 0,
-        inputs = width1Cell @f,
-        outputs = width1Cell @g,
-        inRep = oneCellRep @f,
-        outRep = oneCellRep @g,
+        inputs = length sf,
+        outputs = length sg,
+        inRep = sf,
+        outRep = sg,
         label = n
-    }]
-twoCellToCanonForm (Cmp2 c1 c2) = (twoCellToCanonForm c1) ++ (twoCellToCanonForm c2)
-twoCellToCanonForm (Tensor2 (c1 :: f' :--> g') (c2 :: f'' :--> g'')) =
-    (tensorCanonForm 0 (width1Cell @f'') $ twoCellToCanonForm c1)
-    ++ (tensorCanonForm (width1Cell @g') 0 $ twoCellToCanonForm c2)
+    }
+twoCellToCanonForm (Cmp2 c1 c2) = (twoCellToCanonForm c1) `mergeComposite` (twoCellToCanonForm c2)
+twoCellToCanonForm (Tensor2 (Id2 sf :: f :--> g) (c2 :: f' :--> g')) =
+    tensorCanonFormL @f sf $ twoCellToCanonForm c2
+twoCellToCanonForm (Tensor2 (c1 :: f :--> g) (Id2 sf :: f' :--> g')) =
+    tensorCanonFormR @f' sf $ twoCellToCanonForm c1
+twoCellToCanonForm (Tensor2 (c1 :: f1 :--> g1) (c2 :: f2 :--> g2)) =
+    twoCellToCanonForm $
+        (c1 `Tensor2` Id2 @f2 (extractLeftRep c2))
+        `Cmp2` (Id2 @g1 (extractLeftRep (flip2Cell c1)) `Tensor2` c2)
 
 twoCellLength :: Rational
 twoCellLength = 1
 
-draw2CellAtom :: Point -> TwoCellBoundary -> TwoCellBoundary -> TwoCellAtom -> Text
-draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
+draw2CellAtom :: Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
+draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
     let pr = translateh twoCellLength pl
         popleft = do
             (p1, p2, bdyl, bdyr) <- get
@@ -251,15 +332,15 @@ draw2CellAtom pl bdyl bdyr TwoCellAtom{..} =
             tell $ mkLine "0" "180" p1 p2
 
 
-type TwoCellBoundary = [Rational]
+data TwoCellBoundary f = Bdy { unBdy :: [Rational] }
 
 baseWidth :: Rational
 baseWidth = 1
 
-defaultBoundary :: Int -> TwoCellBoundary
-defaultBoundary n = replicate (n+1) baseWidth
+defaultBoundary :: Int -> TwoCellBoundary f
+defaultBoundary n = Bdy $ replicate (n+1) baseWidth
 
-backpropBoundary :: TwoCellAtom -> TwoCellBoundary -> TwoCellBoundary
+backpropBoundary :: TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBoundary f
 backpropBoundary ca@TwoCellAtom{..} bdy = let
         (bdybefore, mid, bdyafter) = projectBdyR ca bdy
         h = case mid of
@@ -276,15 +357,15 @@ backpropBoundary ca@TwoCellAtom{..} bdy = let
                         inWidth = sum newmid
                       in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
             in [x1] ++ newmid ++ [x2]
-    in bdybefore ++ newmid ++ bdyafter
+    in Bdy $ bdybefore ++ newmid ++ bdyafter
 
-projectBdyL :: TwoCellAtom -> TwoCellBoundary ->
+projectBdyL :: TwoCellAtom f g -> TwoCellBoundary f ->
         ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
 projectBdyL = projectBdyR . flip2CellAtom
 
-projectBdyR :: TwoCellAtom -> TwoCellBoundary ->
+projectBdyR :: TwoCellAtom f g -> TwoCellBoundary g ->
         ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-projectBdyR TwoCellAtom{..} bdy =
+projectBdyR TwoCellAtom{..} (unBdy -> bdy) =
     let (bdybefore, (mid, bdyafter)) =
             fmap (splitAt (outputs+1)) $ splitAt before bdy
      in (bdybefore,
@@ -294,9 +375,9 @@ projectBdyR TwoCellAtom{..} bdy =
         bdyafter)
 
 
-type BdyDelta = (Int, Rational)
+type BdyDelta f = (Int, Rational)
 
-propagateDelta :: TwoCellAtom -> BdyDelta -> [BdyDelta]
+propagateDelta :: TwoCellAtom f g -> BdyDelta f -> [BdyDelta g]
 propagateDelta TwoCellAtom{..} (i, delta) =
     if (inputs == 0 && i == before) || (before < i && i < before + inputs)
        then [(before, delta/2), (before+outputs, delta/2)]
@@ -304,12 +385,12 @@ propagateDelta TwoCellAtom{..} (i, delta) =
        then [(i - inputs + outputs, delta)]
     else [(i, delta)]
 
-applyDelta :: BdyDelta -> TwoCellBoundary -> TwoCellBoundary
-applyDelta (i, delta) bdy =
-    take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
+applyDelta :: BdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
+applyDelta (i, delta) (unBdy -> bdy) =
+    Bdy $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
-backpropDelta :: TwoCellAtom -> TwoCellBoundary -> [BdyDelta]
-backpropDelta TwoCellAtom{..} bdy = let
+backpropDelta :: TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
+backpropDelta TwoCellAtom{..} (unBdy -> bdy) = let
         h = sum $ take (outputs+1) $ drop before bdy
         newh = realToFrac (inputs+1) * baseWidth
      in if newh > h
@@ -317,49 +398,35 @@ backpropDelta TwoCellAtom{..} bdy = let
         else []
 
 
-data LayedOut2Cell =
-    NilLO2C TwoCellBoundary
-      | ConsLO2C TwoCellBoundary TwoCellAtom LayedOut2Cell
+type LayedOut2Cell = Interleaved TwoCellAtom TwoCellBoundary
 
-makeEmptyLO2C :: Int -> LayedOut2Cell
-makeEmptyLO2C n = NilLO2C $ defaultBoundary n
-
-headLO2C :: LayedOut2Cell -> TwoCellBoundary
-headLO2C (NilLO2C bdy) = bdy
-headLO2C (ConsLO2C bdy _ _) = bdy
-
-tailLO2C :: LayedOut2Cell -> TwoCellBoundary
-tailLO2C (NilLO2C bdy) = bdy
-tailLO2C (ConsLO2C _ _ q) = tailLO2C q
-
-iterLO2C :: LayedOut2Cell -> [(TwoCellBoundary, TwoCellAtom, TwoCellBoundary)]
-iterLO2C (NilLO2C bdy) = []
-iterLO2C (ConsLO2C bdy atom (NilLO2C bdy')) = [(bdy, atom, bdy')]
-iterLO2C (ConsLO2C bdy atom q@(ConsLO2C bdy' _ _)) = (bdy, atom, bdy') : iterLO2C q
-
-layOut2Cell :: TwoCellCanonForm -> LayedOut2Cell
-layOut2Cell c = propagateDeltasLO2C [] $ foldr pushAtomLO2C initLOC c
+layOut2Cell :: TwoCellCanonForm f g -> LayedOut2Cell f g
+layOut2Cell c = propagateDeltasLO2C [] $ interleaveInComposite backpropBoundary lastBdy c
     where
-        initLOC = makeEmptyLO2C (totalOutputs (last c))
+        lastBdy :: forall f. TwoCellBoundary f
+        lastBdy = defaultBoundary (headComposite c totalOutputs 0)
 
-        propagateDeltasLO2C :: [BdyDelta] -> LayedOut2Cell -> LayedOut2Cell
-        propagateDeltasLO2C deltas (NilLO2C bdy) = NilLO2C $ foldr applyDelta bdy deltas
-        propagateDeltasLO2C deltas (ConsLO2C bdy atom q) = ConsLO2C newbdy atom $ propagateDeltasLO2C newdeltas q
+        applyDeltas :: [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
+        applyDeltas = flip $ foldr applyDelta
+
+        propagateAndAccumulateDeltas :: [BdyDelta f] -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
+        propagateAndAccumulateDeltas deltas atom bdy =
+            concatMap (propagateDelta atom) deltas ++ backpropDelta atom bdy
+
+        propagateDeltasLO2C :: forall f g. [BdyDelta f] -> LayedOut2Cell f g -> LayedOut2Cell f g
+        propagateDeltasLO2C deltas (NilIntl bdy) = NilIntl $ applyDeltas deltas bdy
+        propagateDeltasLO2C deltas (CmpIntl bdy (atom :: TwoCellAtom f h) q) =
+                CmpIntl newbdy atom $ propagateDeltasLO2C @h @g newdeltas q
             where
-                newbdy = foldr applyDelta bdy deltas
-                newdeltas = concatMap (propagateDelta atom) deltas ++ backpropDelta atom (headLO2C q)
+                newbdy = applyDeltas deltas bdy
+                newdeltas = propagateAndAccumulateDeltas deltas atom (headInterleaved q)
 
-        pushAtomLO2C :: TwoCellAtom -> LayedOut2Cell -> LayedOut2Cell
-        pushAtomLO2C atom c =
-            let bdy = backpropBoundary atom (headLO2C c)
-             in ConsLO2C bdy atom c
-
-drawLO2C :: Point -> LayedOut2Cell -> Text
-drawLO2C p c = evalRWS' () p $ forM_ (iterLO2C c) $
-        \(bdyl, atom, bdyr) -> do
+drawLO2C :: Point -> LayedOut2Cell f g -> Text
+drawLO2C p c = evalRWS' () p $ sequence_ (iterInterleaved c $ \(bdyl, atom, bdyr) -> do
             p <- get
             tell $ draw2CellAtom p bdyl bdyr atom
             put (translateh twoCellLength p)
-       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- headLO2C c ]
-       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- tailLO2C c ]
+        )
+       -- <> T.unlines [ mkLabel p "east" (T.pack n) | (n, p) <- headInterleaved c ]
+       -- <> T.unlines [ mkLabel p "west" (T.pack n) | (n, p) <- tailInterleaved c ]
 
