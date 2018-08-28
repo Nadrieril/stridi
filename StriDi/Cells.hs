@@ -98,6 +98,19 @@ data A2Cell =
 id2 :: A1Cell -> A2Cell
 id2 = AId2
 
+
+flipA2Cell :: A2Cell -> A2Cell
+flipA2Cell (AId2 c) = AId2 c
+flipA2Cell (AAtom2 A2Atom{..}) = AAtom2 $ A2Atom {
+    identifier2 = identifier2,
+    label2 = label2,
+    src2 = tgt2,
+    tgt2 = src2
+}
+flipA2Cell (c1 `ACmp2` c2) = flipA2Cell c2 `ACmp2` flipA2Cell c1
+flipA2Cell (c1 `ATensor2` c2) = flipA2Cell c1 `ATensor2` flipA2Cell c2
+
+
 typeifyA1Cell :: A1Cell -> (forall f. Sing f -> r) -> r
 typeifyA1Cell (A1Cell l) f = f (fmap label1 l)
 
@@ -117,4 +130,3 @@ typeifyA2Cell (ATensor2 c1 c2) f =
     typeifyA2Cell c1 $ \c1 ->
     typeifyA2Cell c2 $ \c2 ->
     f $ c1 `Tensor2` unsafeCoerce c2
-

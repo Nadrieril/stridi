@@ -1,6 +1,6 @@
 module StriDi.DSL where
 
-import Prelude hiding ((.), (*), id)
+import Prelude hiding ((**), (*))
 import Data.Text
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
@@ -38,6 +38,22 @@ new2C s src tgt = AAtom2 $ A2Atom {
     tgt2 = tgt
 }
 
+
+srcA2Cell :: A2Cell -> A1Cell
+srcA2Cell (AId2 c) = c
+srcA2Cell (AAtom2 atom) = src2 atom
+srcA2Cell (c `ACmp2` _) = srcA2Cell c
+srcA2Cell (c1 `ATensor2` c2) = srcA2Cell c1 * srcA2Cell c2
+
+tgtA2Cell :: A2Cell -> A1Cell
+tgtA2Cell = srcA2Cell . flipA2Cell
+
+
+class Sealable a where
+    seal :: Text -> a -> a
+
+instance Sealable A2Cell where
+    seal s c = new2C s (srcA2Cell c) (tgtA2Cell c)
 
 -- data StriDiState = StriDiState {
 
