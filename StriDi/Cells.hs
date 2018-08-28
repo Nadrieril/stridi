@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
-    ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, AllowAmbiguousTypes #-}
+    ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, AllowAmbiguousTypes, RecordWildCards #-}
 module StriDi.Cells where
 
 import GHC.TypeLits
@@ -8,16 +8,18 @@ import Data.Monoid ((<>))
 import Data.Proxy
 import qualified Data.Text as T
 import Data.Text (Text)
+import Unsafe.Coerce (unsafeCoerce)
+import Data.String (IsString(..))
 
 
-type A1Cell = [Symbol]
+type OneCell = [Symbol]
 type Id1 = '[]
 type Cmp1 a b = a ++ b
 
 
 type Sing (f :: [Symbol]) = [Text]
 
-data (f :: A1Cell) :--> (g :: A1Cell) where
+data (f :: OneCell) :--> (g :: OneCell) where
     Labelled2 :: Text -> Sing f -> Sing g -> f :--> g
     Id2 :: Sing f -> f :--> f
     Cmp2 :: (f :--> g) -> (g :--> h) -> (f :--> h)
@@ -48,8 +50,71 @@ instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
 labelled2 :: forall f g. (Reify1 f, Reify1 g) => Text -> f :--> g
 labelled2 l = Labelled2 l (reify1 @f) (reify1 @g)
 
-id2 :: forall f. Reify1 f => f :--> f
-id2 = Id2 (reify1 @f)
+-- id2 :: forall f. Reify1 f => f :--> f
+-- id2 = Id2 (reify1 @f)
 
 seal2Cell :: Text -> f :--> g -> f :--> g
 seal2Cell s c = Labelled2 s (extractLeftRep c) (extractLeftRep (flip2Cell c))
+
+
+
+data Identifier = AutoId Int | CustomId Text
+    deriving (Eq)
+
+instance IsString Identifier where
+    fromString s = CustomId $ T.pack s
+
+
+data A0Cell = A0Cell {
+    identifier0 :: Identifier,
+    label0 :: Text
+} deriving (Eq)
+
+
+data A1Atom = A1Atom {
+    identifier1 :: Identifier,
+    label1 :: Text,
+    src1 :: A0Cell,
+    tgt1 :: A0Cell
+} deriving (Eq)
+
+data A1Cell = A1Cell [A1Atom]
+    deriving (Eq)
+
+
+data A2Atom = A2Atom {
+    identifier2 :: Identifier,
+    label2 :: Text,
+    src2 :: A1Cell,
+    tgt2 :: A1Cell
+} deriving (Eq)
+
+data A2Cell =
+    AAtom2 A2Atom
+    | AId2 A1Cell
+    | ACmp2 A2Cell A2Cell
+    | ATensor2 A2Cell A2Cell
+
+id2 :: A1Cell -> A2Cell
+id2 = AId2
+
+typeifyA1Cell :: A1Cell -> (forall f. Sing f -> r) -> r
+typeifyA1Cell (A1Cell l) f = f (fmap label1 l)
+
+typeifyA2Cell :: A2Cell -> (forall f g. f :--> g -> r) -> r
+typeifyA2Cell (AAtom2 A2Atom{..}) f =
+    typeifyA1Cell src2 $ \sf ->
+    typeifyA1Cell tgt2 $ \sg ->
+    f $ Labelled2 label2 sf sg
+typeifyA2Cell (AId2 src) f =
+    typeifyA1Cell src $ \sf ->
+    f $ Id2 sf
+typeifyA2Cell (ACmp2 c1 c2) f =
+    typeifyA2Cell c1 $ \c1 ->
+    typeifyA2Cell c2 $ \c2 ->
+    f $ c1 `Cmp2` unsafeCoerce c2
+typeifyA2Cell (ATensor2 c1 c2) f =
+    typeifyA2Cell c1 $ \c1 ->
+    typeifyA2Cell c2 $ \c2 ->
+    f $ c1 `Tensor2` unsafeCoerce c2
+

@@ -1,12 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
-module StriDi.Render
-    ( Id1, Cmp1, (:-->)(..)
-    , id2, labelled2
-    , flip2Cell
-    , draw2Cell
-    ) where
+module StriDi.Render where
 
 import qualified Data.Text as T
 import Data.Proxy
@@ -47,10 +42,13 @@ translatev dy = translate 0 dy
 
 mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
 mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};\n"
-mkNode p label = "\\node at " <> render p <> " [circle, draw, fill=white] {" <> label <> "};\n"
+mkNode p label = "\\node at " <> render p <> " [rectangle, draw, fill=white] {" <> label <> "};\n"
 
 draw2Cell :: (f :--> g) -> Text
 draw2Cell = drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
+
+drawA2Cell :: A2Cell -> Text
+drawA2Cell c = typeifyA2Cell c draw2Cell
 
 
 
