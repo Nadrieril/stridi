@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, AllowAmbiguousTypes #-}
-module Stridi.Cells where
+module StriDi.Cells where
 
 import GHC.TypeLits
 import Data.Promotion.Prelude.List

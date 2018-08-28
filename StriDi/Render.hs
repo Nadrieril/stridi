@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
-module Stridi.Render
+module StriDi.Render
     ( Id1, Cmp1, (:-->)(..)
     , id2, labelled2
     , flip2Cell
@@ -16,8 +16,8 @@ import Control.Monad.RWS.Strict
 import Control.Exception.Base (assert)
 import Text.LaTeX
 
-import Stridi.TypedSeq
-import Stridi.Cells
+import StriDi.TypedSeq
+import StriDi.Cells
 
 evalRWS' :: r -> s -> RWS r w s a -> w
 evalRWS' r s rws = snd $ evalRWS rws r s

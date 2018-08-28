@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, TypeApplications, ScopedTypeVariables, RankNTypes, PolyKinds #-}
-module Stridi.TypedSeq where
+module StriDi.TypedSeq where
 
 
 data Composite f a b where
