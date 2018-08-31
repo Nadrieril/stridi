@@ -46,7 +46,7 @@ srcA2Cell (c `ACmp2` _) = srcA2Cell c
 srcA2Cell (c1 `ATensor2` c2) = srcA2Cell c1 * srcA2Cell c2
 
 tgtA2Cell :: A2Cell -> A1Cell
-tgtA2Cell = srcA2Cell . flipA2Cell
+tgtA2Cell = srcA2Cell . revA2Cell
 
 
 class Sealable a where

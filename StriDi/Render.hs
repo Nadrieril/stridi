@@ -48,7 +48,7 @@ draw2Cell :: (f :--> g) -> Text
 draw2Cell = drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
 
 drawA2Cell :: A2Cell -> Text
-drawA2Cell c = typeifyA2Cell c draw2Cell
+drawA2Cell c = typeifyA2Cell (flipA2Cell c) draw2Cell
 
 
 
