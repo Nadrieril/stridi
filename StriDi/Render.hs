@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
-module StriDi.Render where
+module StriDi.Render (draw2Cell, drawA2Cell) where
 
 import qualified Data.Text as T
 import Data.Proxy
@@ -10,6 +10,8 @@ import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
 import Control.Exception.Base (assert)
 import Text.LaTeX
+import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
+import Text.LaTeX.Base.Syntax (LaTeX(..))
 
 import StriDi.TypedSeq
 import StriDi.Cells
@@ -40,15 +42,20 @@ translatev dy = translate 0 dy
 
 
 
+ensuremath :: LaTeXC l => l -> l
+ensuremath = comm1 "ensuremath"
+
 mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
-mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {" <> label <> "};\n"
-mkNode p label = "\\node at " <> render p <> " [rectangle, draw, fill=white] {" <> label <> "};\n"
+mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {"
+            <> render (ensuremath $ label1 label) <> "};\n"
+mkNode p label = "\\node at " <> render p <> " [rectangle, draw, fill=white] {"
+            <> render (ensuremath $ label2 label) <> "};\n"
 
-draw2Cell :: (f :--> g) -> Text
-draw2Cell = drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
+draw2Cell :: LaTeXC l => (f :--> g) -> l
+draw2Cell = fromLaTeX . TeXEnv "tikzpicture" [] . raw . drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
 
-drawA2Cell :: A2Cell -> Text
-drawA2Cell c = typeifyA2Cell (flipA2Cell c) draw2Cell
+drawA2Cell :: LaTeXC l => A2Cell -> l
+drawA2Cell (A2Cell c) = draw2Cell c
 
 
 
@@ -58,9 +65,9 @@ data TwoCellAtom f g = TwoCellAtom {
     after :: Int,
     inputs :: Int,
     outputs :: Int,
-    inRep :: Sing f,
-    outRep :: Sing g,
-    label :: Text
+    inRep :: Sing1 f,
+    outRep :: Sing1 g,
+    label :: TwoCellData
 }
 
 totalInputs :: TwoCellAtom f g -> Int
@@ -70,40 +77,45 @@ totalOutputs :: TwoCellAtom f g -> Int
 totalOutputs TwoCellAtom{..} = before + outputs + after
 
 flip2CellAtom :: TwoCellAtom f g -> TwoCellAtom g f
-flip2CellAtom ca@TwoCellAtom{..} = ca { inputs = outputs, outputs = inputs }
+flip2CellAtom ca@TwoCellAtom{..} = ca {
+    inputs = outputs,
+    outputs = inputs,
+    inRep = outRep,
+    outRep = inRep
+}
 
-tensor2CellAtomL :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (x `Cmp1` f) (x `Cmp1` g)
+tensor2CellAtomL :: forall x f g. Sing1 x -> TwoCellAtom f g -> TwoCellAtom (x `Cmp1` f) (x `Cmp1` g)
 tensor2CellAtomL sx ca = ca {
-        before = before ca + length sx,
-        inRep = sx ++ inRep ca,
-        outRep = sx ++ outRep ca
+        before = before ca + length1 sx,
+        inRep = sx `cmp1` inRep ca,
+        outRep = sx `cmp1` outRep ca
     }
 
-tensor2CellAtomR :: forall x f g. Sing x -> TwoCellAtom f g -> TwoCellAtom (f `Cmp1` x) (g `Cmp1` x)
+tensor2CellAtomR :: forall x f g. Sing1 x -> TwoCellAtom f g -> TwoCellAtom (f `Cmp1` x) (g `Cmp1` x)
 tensor2CellAtomR sx ca = ca {
-        after = after ca + length sx,
-        inRep = inRep ca ++ sx,
-        outRep = outRep ca ++ sx
+        after = after ca + length1 sx,
+        inRep = inRep ca `cmp1` sx,
+        outRep = outRep ca `cmp1` sx
     }
 
 
 type TwoCellCanonForm = Composite TwoCellAtom
 
-tensorCanonFormL :: forall x f g. Sing x -> TwoCellCanonForm f g -> TwoCellCanonForm (x `Cmp1` f) (x `Cmp1` g)
+tensorCanonFormL :: forall x f g. Sing1 x -> TwoCellCanonForm f g -> TwoCellCanonForm (x `Cmp1` f) (x `Cmp1` g)
 tensorCanonFormL sx NilCte = NilCte
 tensorCanonFormL sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomL @x sx atom) $ tensorCanonFormL @x sx q
 
-tensorCanonFormR :: forall x f g. Sing x -> TwoCellCanonForm f g -> TwoCellCanonForm (f `Cmp1` x) (g `Cmp1` x)
+tensorCanonFormR :: forall x f g. Sing1 x -> TwoCellCanonForm f g -> TwoCellCanonForm (f `Cmp1` x) (g `Cmp1` x)
 tensorCanonFormR sx NilCte = NilCte
 tensorCanonFormR sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomR @x sx atom) $ tensorCanonFormR @x sx q
 
 twoCellToCanonForm :: f :--> g -> TwoCellCanonForm f g
-twoCellToCanonForm (Id2 sf) = twoCellToCanonForm (Labelled2 "id" sf sf)
-twoCellToCanonForm (Labelled2 n sf sg) = singComposite $ TwoCellAtom {
+twoCellToCanonForm (Id2 sf) = twoCellToCanonForm (Mk2 (TwoCellData "id") sf sf)
+twoCellToCanonForm (Mk2 n sf sg) = singComposite $ TwoCellAtom {
         before = 0,
         after = 0,
-        inputs = length sf,
-        outputs = length sg,
+        inputs = length1 sf,
+        outputs = length1 sg,
         inRep = sf,
         outRep = sg,
         label = n
@@ -115,8 +127,8 @@ twoCellToCanonForm (Tensor2 (c1 :: f :--> g) (Id2 sf :: f' :--> g')) =
     tensorCanonFormR @f' sf $ twoCellToCanonForm c1
 twoCellToCanonForm (Tensor2 (c1 :: f1 :--> g1) (c2 :: f2 :--> g2)) =
     twoCellToCanonForm $
-        (c1 `Tensor2` Id2 @f2 (extractLeftRep c2))
-        `Cmp2` (Id2 @g1 (extractLeftRep (flip2Cell c1)) `Tensor2` c2)
+        (c1 `Tensor2` Id2 @f2 (src2 c2))
+        `Cmp2` (Id2 @g1 (tgt2 c1) `Tensor2` c2)
 
 twoCellLength :: Rational
 twoCellLength = 5
@@ -161,7 +173,7 @@ draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
 
 
 data TwoCellBoundary f = Bdy {
-    repBdy :: Sing f,
+    repBdy :: Sing1 f,
     unBdy :: [Rational]
 }
 
@@ -265,7 +277,7 @@ drawLO2C p0 c =
        <> drawBdyLabels (lastInterleaved c) pend "west"
     where
         drawBdyLabels (Bdy rep bdy) p0 dir =
-            T.unlines [ mkLabel p dir n
-                | n <- rep
+            T.unlines [ mkLabel p dir d
+                | d <- list1Cells rep
                 | p <- tail $ scanl (flip translatev) p0 bdy ]
 

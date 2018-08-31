@@ -4,6 +4,7 @@ import Prelude hiding ((**), (*))
 import Data.Text
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
+import Text.LaTeX
 import StriDi.Cells
 
 
@@ -12,64 +13,32 @@ class Composable a where
     (**) :: a -> a -> a
 
 instance Composable A1Cell where
-    (A1Cell x) * (A1Cell y) = A1Cell $ x ++ y
+    (*) = cmpA1
     (**) = (*)
 
 instance Composable A2Cell where
-    (*) = ACmp2
-    (**) = ATensor2
+    (*) = cmpA2
+    (**) = tensorA2
 
 monoidal0Cell :: A0Cell
-monoidal0Cell = A0Cell (AutoId 0) (pack "$*$")
+monoidal0Cell = mkA0 $ ZeroCellData (raw $ pack "*")
 
-new1C :: Text -> A1Cell
-new1C s = A1Cell [A1Atom {
-    identifier1 = CustomId s,
-    label1 = s,
-    src1 = monoidal0Cell,
-    tgt1 = monoidal0Cell
-}]
+new1C :: LaTeX -> A1Cell
+new1C s = mkA1 (OneCellData s) monoidal0Cell monoidal0Cell
 
-new2C :: Text -> A1Cell -> A1Cell -> A2Cell
-new2C s src tgt = AAtom2 $ A2Atom {
-    identifier2 = CustomId s,
-    label2 = s,
-    src2 = src,
-    tgt2 = tgt
-}
+id1 :: A1Cell
+id1 = idA1 monoidal0Cell
 
+new2C :: LaTeX -> A1Cell -> A1Cell -> A2Cell
+new2C s = mkA2 (TwoCellData s)
 
-srcA2Cell :: A2Cell -> A1Cell
-srcA2Cell (AId2 c) = c
-srcA2Cell (AAtom2 atom) = src2 atom
-srcA2Cell (c `ACmp2` _) = srcA2Cell c
-srcA2Cell (c1 `ATensor2` c2) = srcA2Cell c1 * srcA2Cell c2
-
-tgtA2Cell :: A2Cell -> A1Cell
-tgtA2Cell = srcA2Cell . revA2Cell
+id2 :: A1Cell -> A2Cell
+id2 = idA2
 
 
 class Sealable a where
-    seal :: Text -> a -> a
+    seal :: LaTeX -> a -> a
 
 instance Sealable A2Cell where
-    seal s c = new2C s (srcA2Cell c) (tgtA2Cell c)
+    seal s (A2Cell c) = A2Cell $ seal2Cell (TwoCellData s) c
 
--- data StriDiState = StriDiState {
-
--- }
-
--- data Definition = Def0 A0Cell | Def1 A1Cell | Def2 A2Cell
-
--- type StriDiMonadT = RWST () () StriDiState
--- type StriDiMonad = StriDiMonadT Identity
-
--- example :: StriDiMonad A2Cell
--- example = do
---     a <- new0C
---     b <- new0C
---     f <- new1C "f" a b
---     g <- new1C "g" b b
---     al <- new2C "$\\alpha$" f (f . g)
---     be <- new2C "$\\beta$" g f
---     return $ al . (id f * be)

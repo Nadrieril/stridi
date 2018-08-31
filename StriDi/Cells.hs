@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
-    ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, AllowAmbiguousTypes, RecordWildCards #-}
+    ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, AllowAmbiguousTypes, RecordWildCards, TypeFamilies #-}
 module StriDi.Cells where
 
 import GHC.TypeLits
+import Data.Type.Equality
 import Data.Promotion.Prelude.List
 import Data.Monoid ((<>))
 import Data.Proxy
@@ -10,136 +11,184 @@ import qualified Data.Text as T
 import Data.Text (Text)
 import Unsafe.Coerce (unsafeCoerce)
 import Data.String (IsString(..))
+import Text.LaTeX
 
 
-type OneCell = [Symbol]
-type Id1 = '[]
-type Cmp1 a b = a ++ b
+
+data ZeroCellData = ZeroCellData {
+    label0 :: LaTeX
+} deriving (Eq)
+
+data OneCellData = OneCellData {
+    label1 :: LaTeX
+} deriving (Eq, Show)
+
+data TwoCellData = TwoCellData {
+    label2 :: LaTeX
+} deriving (Eq)
 
 
-type Sing (f :: [Symbol]) = [Text]
+-- Type-level
+data ZeroCell = ZeroCell
 
-data (f :: OneCell) :--> (g :: OneCell) where
-    Labelled2 :: Text -> Sing f -> Sing g -> f :--> g
-    Id2 :: Sing f -> f :--> f
+data OneCell (a::ZeroCell) (b::ZeroCell) = OneCell
+
+data (a::ZeroCell) :-> (b::ZeroCell) where
+    TId1 :: a :-> a
+    TCons1 :: OneCell a b -> b :-> c -> a :-> c
+
+type family Cmp1 (x :: a :-> b) (y :: b :-> c) :: a :-> c where
+    Cmp1 TId1 y = y
+    Cmp1 (TCons1 c q) y = TCons1 c (Cmp1 q y)
+
+
+-- Statically-typed
+data Sing0 (a :: ZeroCell) = Sing0 ZeroCellData
+
+data Sing1 (f :: a :-> b) where
+    Mk1 :: OneCellData -> Sing0 a -> Sing0 b -> Sing1 (f :: a :-> b)
+    Id1 :: Sing0 a -> Sing1 (TId1 :: a :-> a)
+    Cmp1 :: Sing1 (f :: a :-> b) -> Sing1 (g :: b :-> c) -> Sing1 (f `Cmp1` g)
+
+data (f :: a :-> b) :--> (g :: a :-> b) where
+    Mk2 :: TwoCellData -> Sing1 f -> Sing1 g -> f :--> g
+    Id2 :: Sing1 f -> f :--> f
     Cmp2 :: (f :--> g) -> (g :--> h) -> (f :--> h)
     Tensor2 :: (f :--> g) -> (f' :--> g') -> (Cmp1 f f' :--> Cmp1 g g')
 
+
+instance TestEquality Sing0 where
+    testEquality (Sing0 x1) (Sing0 x2) =
+        if x1 == x2
+           then Just $ unsafeCoerce Refl
+           else Nothing
+
+instance TestEquality Sing1 where
+    testEquality c1 c2 =
+        case testAligned1 c1 c2 of
+            Just (Refl, Refl)
+                | list1Cells c1 == list1Cells c2 -> Just $ unsafeCoerce Refl
+            _ -> Nothing
+
+testAligned1 :: Sing1 (f :: a :-> b) -> Sing1 (g :: c :-> d) -> Maybe (a :~: c, b :~: d)
+testAligned1 c1 c2 =
+    case (testEquality (src1 c1) (src1 c2), testEquality (tgt1 c1) (tgt1 c2)) of
+       (Just Refl, Just Refl) -> Just (Refl, Refl)
+       _ -> Nothing
+
+
+cmp1 :: Sing1 f -> Sing1 g -> Sing1 (f `Cmp1` g)
+cmp1 = Cmp1
+
+length1 :: Sing1 f -> Int
+length1 (Mk1 _ _ _) = 1
+length1 (Id1 _) = 0
+length1 (Cmp1 f g) = length1 f + length1 g
+
+src1 :: Sing1 (f :: a :-> b) -> Sing0 a
+src1 (Mk1 _ a _) = a
+src1 (Id1 a) = a
+src1 (Cmp1 f _) = src1 f
+
+tgt1 :: Sing1 (f :: a :-> b) -> Sing0 b
+tgt1 (Mk1 _ _ b) = b
+tgt1 (Id1 a) = a
+tgt1 (Cmp1 _ g) = tgt1 g
+
+list1Cells :: Sing1 f -> [OneCellData]
+list1Cells (Mk1 d _ _) = [d]
+list1Cells (Id1 _) = []
+list1Cells (Cmp1 f g) = list1Cells f ++ list1Cells g
+
+-- flip1Cell :: Sing1 (f :: a :-> b) -> Sing1 (g :: b :-> a)
+-- flip1Cell (Mk1 l a b) = Mk1 l b a
+-- flip1Cell (Cmp1 f g) = Cmp1 (flip1Cell f) (flip1Cell g)
+
+
+src2 :: f :--> g -> Sing1 f
+src2 (Id2 sf) = sf
+src2 (Mk2 _ sf _) = sf
+src2 (Cmp2 c1 _) = src2 c1
+src2 (Tensor2 c1 c2) = src2 c1 `Cmp1` src2 c2
+
+tgt2 :: f :--> g -> Sing1 g
+tgt2 = src2 . flip2Cell
+
 flip2Cell :: f :--> g -> g :--> f
 flip2Cell (Id2 sf) = Id2 sf
-flip2Cell (Labelled2 n sf sg) = Labelled2 (n <> "'") sg sf
+flip2Cell (Mk2 n sf sg) = Mk2 n sg sf
 flip2Cell (Cmp2 c1 c2) = Cmp2 (flip2Cell c2) (flip2Cell c1)
 flip2Cell (Tensor2 c1 c2) = Tensor2 (flip2Cell c1) (flip2Cell c2)
 
-extractLeftRep :: f :--> g -> Sing f
-extractLeftRep (Id2 sf) = sf
-extractLeftRep (Labelled2 _ sf _) = sf
-extractLeftRep (Cmp2 c1 _) = extractLeftRep c1
-extractLeftRep (Tensor2 c1 c2) = let
-        r1 = extractLeftRep c1
-        r2 = extractLeftRep c2
-    in r1 ++ r2
-
-class Reify1 (f :: [Symbol]) where
-    reify1 :: Sing f
-instance Reify1 '[] where
-    reify1 = []
-instance (KnownSymbol s, Reify1 f) => Reify1 (s ': f) where
-    reify1 = T.pack (symbolVal (Proxy @s)) : reify1 @f
-
-labelled2 :: forall f g. (Reify1 f, Reify1 g) => Text -> f :--> g
-labelled2 l = Labelled2 l (reify1 @f) (reify1 @g)
-
--- id2 :: forall f. Reify1 f => f :--> f
--- id2 = Id2 (reify1 @f)
-
-seal2Cell :: Text -> f :--> g -> f :--> g
-seal2Cell s c = Labelled2 s (extractLeftRep c) (extractLeftRep (flip2Cell c))
+seal2Cell :: TwoCellData -> f :--> g -> f :--> g
+seal2Cell s c = Mk2 s (src2 c) (tgt2 c)
 
 
 
-data Identifier = AutoId Int | CustomId Text
-    deriving (Eq)
+-- Dynamically-typed
+data A0Cell where
+    A0Cell :: Sing0 a -> A0Cell
 
-instance IsString Identifier where
-    fromString s = CustomId $ T.pack s
+data A1Cell where
+    A1Cell :: Sing1 f -> A1Cell
 
-
-data A0Cell = A0Cell {
-    identifier0 :: Identifier,
-    label0 :: Text
-} deriving (Eq)
+data A2Cell where
+    A2Cell :: f :--> g -> A2Cell
 
 
-data A1Atom = A1Atom {
-    identifier1 :: Identifier,
-    label1 :: Text,
-    src1 :: A0Cell,
-    tgt1 :: A0Cell
-} deriving (Eq)
-
-data A1Cell = A1Cell [A1Atom]
-    deriving (Eq)
-
-rev1Cell :: A1Cell -> A1Cell
-rev1Cell (A1Cell l) = A1Cell $ reverse l
+mkA0 :: ZeroCellData -> A0Cell
+mkA0 s = A0Cell $ Sing0 s
 
 
-data A2Atom = A2Atom {
-    identifier2 :: Identifier,
-    label2 :: Text,
-    src2 :: A1Cell,
-    tgt2 :: A1Cell
-} deriving (Eq)
+mkA1 :: OneCellData -> A0Cell -> A0Cell -> A1Cell
+mkA1 d (A0Cell a) (A0Cell b) = A1Cell $ Mk1 d a b
 
-data A2Cell =
-    AAtom2 A2Atom
-    | AId2 A1Cell
-    | ACmp2 A2Cell A2Cell
-    | ATensor2 A2Cell A2Cell
+idA1 :: A0Cell -> A1Cell
+idA1 (A0Cell a) = A1Cell $ Id1 a
 
-id2 :: A1Cell -> A2Cell
-id2 = AId2
+srcA1 :: A1Cell -> A0Cell
+srcA1 (A1Cell c) = A0Cell $ src1 c
 
-revA2Cell :: A2Cell -> A2Cell
-revA2Cell (AId2 c) = AId2 c
-revA2Cell (AAtom2 A2Atom{..}) = AAtom2 $ A2Atom {
-    identifier2 = identifier2,
-    label2 = label2,
-    src2 = tgt2,
-    tgt2 = src2
-}
-revA2Cell (c1 `ACmp2` c2) = revA2Cell c2 `ACmp2` revA2Cell c1
-revA2Cell (c1 `ATensor2` c2) = revA2Cell c1 `ATensor2` revA2Cell c2
+tgtA1 :: A1Cell -> A0Cell
+tgtA1 (A1Cell c) = A0Cell $ tgt1 c
 
-flipA2Cell :: A2Cell -> A2Cell
-flipA2Cell (AId2 c) = AId2 $ rev1Cell c
-flipA2Cell (AAtom2 A2Atom{..}) = AAtom2 $ A2Atom {
-    identifier2 = identifier2,
-    label2 = label2,
-    src2 = rev1Cell $ src2,
-    tgt2 = rev1Cell $ tgt2
-}
-flipA2Cell (c1 `ACmp2` c2) = flipA2Cell c1 `ACmp2` flipA2Cell c2
-flipA2Cell (c1 `ATensor2` c2) = flipA2Cell c2 `ATensor2` flipA2Cell c1
+cmpA1 :: A1Cell -> A1Cell -> A1Cell
+cmpA1 (A1Cell c1) (A1Cell c2) =
+    case testAligned1 c1 c2 of
+        Just (Refl, Refl) -> case testEquality (tgt1 c1) (src1 c2) of
+            Just Refl -> A1Cell $ Cmp1 c1 c2
+            _ -> error "Type error in cmpA1"
+        _ -> error "Type error in cmpA1"
 
 
-typeifyA1Cell :: A1Cell -> (forall f. Sing f -> r) -> r
-typeifyA1Cell (A1Cell l) f = f (fmap label1 l)
+mkA2 :: TwoCellData -> A1Cell -> A1Cell -> A2Cell
+mkA2 s (A1Cell f) (A1Cell g) =
+    case testAligned1 f g of
+        Just (Refl, Refl) -> A2Cell $ Mk2 s f g
+        Nothing -> error $ "Type error in mkA2 " ++ show (label2 s)
 
-typeifyA2Cell :: A2Cell -> (forall f g. f :--> g -> r) -> r
-typeifyA2Cell (AAtom2 A2Atom{..}) f =
-    typeifyA1Cell src2 $ \sf ->
-    typeifyA1Cell tgt2 $ \sg ->
-    f $ Labelled2 label2 sf sg
-typeifyA2Cell (AId2 src) f =
-    typeifyA1Cell src $ \sf ->
-    f $ Id2 sf
-typeifyA2Cell (ACmp2 c1 c2) f =
-    typeifyA2Cell c1 $ \c1 ->
-    typeifyA2Cell c2 $ \c2 ->
-    f $ c1 `Cmp2` unsafeCoerce c2
-typeifyA2Cell (ATensor2 c1 c2) f =
-    typeifyA2Cell c1 $ \c1 ->
-    typeifyA2Cell c2 $ \c2 ->
-    f $ c1 `Tensor2` unsafeCoerce c2
+idA2 :: A1Cell -> A2Cell
+idA2 (A1Cell f) = A2Cell $ Id2 f
+
+srcA2 :: A2Cell -> A1Cell
+srcA2 (A2Cell c) = A1Cell $ src2 c
+
+tgtA2 :: A2Cell -> A1Cell
+tgtA2 (A2Cell c) = A1Cell $ tgt2 c
+
+cmpA2 :: A2Cell -> A2Cell -> A2Cell
+cmpA2 (A2Cell c1) (A2Cell c2) =
+    case testAligned1 (tgt2 c1) (src2 c2) of
+        Just (Refl, Refl) -> case testEquality (tgt2 c1) (src2 c2) of
+            Just Refl -> A2Cell (c1 `Cmp2` c2)
+            Nothing -> error $ "Type error in cmpA2: cannot match "
+                               ++ show (list1Cells $ tgt2 c1) ++ " and " ++ show (list1Cells $ src2 c2)
+        Nothing -> error $ "Type error in cmpA2: cannot match types of "
+                            ++ show (list1Cells $ tgt2 c1) ++ " and " ++ show (list1Cells $ src2 c2)
+
+tensorA2 :: A2Cell -> A2Cell -> A2Cell
+tensorA2 (A2Cell c1) (A2Cell c2) =
+    case testEquality (tgt1 $ src2 c1) (src1 $ src2 c2) of
+        Just Refl -> A2Cell (c1 `Tensor2` c2)
+        Nothing -> error "Type error in tensorA2"
+
