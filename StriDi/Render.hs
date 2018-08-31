@@ -119,7 +119,7 @@ twoCellToCanonForm (Tensor2 (c1 :: f1 :--> g1) (c2 :: f2 :--> g2)) =
         `Cmp2` (Id2 @g1 (extractLeftRep (flip2Cell c1)) `Tensor2` c2)
 
 twoCellLength :: Rational
-twoCellLength = 1
+twoCellLength = 5
 
 draw2CellAtom :: Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
 draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
@@ -166,7 +166,7 @@ data TwoCellBoundary f = Bdy {
 }
 
 baseWidth :: Rational
-baseWidth = 1
+baseWidth = 2
 
 defaultBoundary :: TwoCellAtom f g -> TwoCellBoundary g
 defaultBoundary ca = Bdy (outRep ca) $ replicate (totalOutputs ca+1) baseWidth
