@@ -1,7 +1,13 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
-module StriDi.Render (draw2Cell, drawA2Cell) where
+module StriDi.Render
+    ( draw2Cell
+    , drawA2Cell
+    , RenderOptions(..)
+    , defaultRenderOpts
+    , largeRenderOpts
+    ) where
 
 import qualified Data.Text as T
 import Data.Proxy
@@ -51,12 +57,21 @@ mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "]
 mkNode p label = "\\node at " <> render p <> " [rectangle, draw, fill=white] {"
             <> render (ensuremath $ label2 label) <> "};\n"
 
-draw2Cell :: LaTeXC l => (f :--> g) -> l
-draw2Cell = fromLaTeX . TeXEnv "tikzpicture" [] . raw . drawLO2C (Point 0 0) . layOut2Cell . twoCellToCanonForm
+data RenderOptions = RenderOptions {
+    renderWidth2Cell :: Rational,
+    renderLength2Cell :: Rational
+}
+defaultRenderOpts = RenderOptions 1 2
+largeRenderOpts = RenderOptions 2 5
 
-drawA2Cell :: LaTeXC l => A2Cell -> l
-drawA2Cell (A2Cell c) = draw2Cell c
+draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
+draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
+    . drawLO2C (Point 0 0) opts
+    . layOut2Cell (renderWidth2Cell opts)
+    . twoCellToCanonForm
 
+drawA2Cell :: LaTeXC l => RenderOptions -> A2Cell -> l
+drawA2Cell opts (A2Cell c) = draw2Cell opts c
 
 
 
@@ -130,12 +145,9 @@ twoCellToCanonForm (Tensor2 (c1 :: f1 :--> g1) (c2 :: f2 :--> g2)) =
         (c1 `Tensor2` Id2 @f2 (src2 c2))
         `Cmp2` (Id2 @g1 (tgt2 c1) `Tensor2` c2)
 
-twoCellLength :: Rational
-twoCellLength = 5
-
-draw2CellAtom :: Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
-draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
-    let pr = translateh twoCellLength pl
+draw2CellAtom :: RenderOptions -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
+draw2CellAtom opts pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
+    let pr = translateh (renderLength2Cell opts) pl
         popleft = do
             (p1, p2, bdyl, bdyr) <- get
             let p1' = translatev (head bdyl) p1
@@ -156,7 +168,7 @@ draw2CellAtom pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
                 _ | inputs == 0 && outputs == 0 -> head bdyl
                 _ | inputs == 0 -> head bdyr + sum (take outputs bdyr)
                 _  -> head bdyl + sum (take inputs bdyl)
-        let p = translate (twoCellLength / 2) (width / 2) p1
+        let p = translate ((renderLength2Cell opts) / 2) (width / 2) p1
         replicateM_ inputs $ do
             p1 <- popleft
             let angle = if y p == y p1 then "180" else if y p < y p1 then "90" else "-90"
@@ -177,14 +189,11 @@ data TwoCellBoundary f = Bdy {
     unBdy :: [Rational]
 }
 
-baseWidth :: Rational
-baseWidth = 2
+defaultBoundary :: Rational -> TwoCellAtom f g -> TwoCellBoundary g
+defaultBoundary baseWidth ca = Bdy (outRep ca) $ replicate (totalOutputs ca+1) baseWidth
 
-defaultBoundary :: TwoCellAtom f g -> TwoCellBoundary g
-defaultBoundary ca = Bdy (outRep ca) $ replicate (totalOutputs ca+1) baseWidth
-
-backpropBoundary :: TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBoundary f
-backpropBoundary ca@TwoCellAtom{..} bdy = let
+backpropBoundary :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBoundary f
+backpropBoundary baseWidth ca@TwoCellAtom{..} bdy = let
         (bdybefore, mid, bdyafter) = projectBdyR ca bdy
         h = case mid of
               Left h -> h
@@ -232,8 +241,8 @@ applyDelta :: BdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
 applyDelta (i, delta) (Bdy sf bdy) =
     Bdy sf $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
-backpropDelta :: TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
-backpropDelta TwoCellAtom{..} (unBdy -> bdy) = let
+backpropDelta :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
+backpropDelta baseWidth TwoCellAtom{..} (unBdy -> bdy) = let
         h = sum $ take (outputs+1) $ drop before bdy
         newh = realToFrac (inputs+1) * baseWidth
      in if newh > h
@@ -243,18 +252,18 @@ backpropDelta TwoCellAtom{..} (unBdy -> bdy) = let
 
 type LayedOut2Cell = Interleaved TwoCellAtom TwoCellBoundary
 
-layOut2Cell :: forall f g. TwoCellCanonForm f g -> LayedOut2Cell f g
-layOut2Cell c = propagateDeltasLO2C [] $ interleaveInComposite backpropBoundary lastBdy c
+layOut2Cell :: forall f g. Rational -> TwoCellCanonForm f g -> LayedOut2Cell f g
+layOut2Cell baseWidth c = propagateDeltasLO2C [] $ interleaveInComposite (backpropBoundary baseWidth) lastBdy c
     where
         lastBdy :: TwoCellBoundary g
-        lastBdy = lastComposite c defaultBoundary undefined
+        lastBdy = lastComposite c (defaultBoundary baseWidth) undefined
 
         applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
         applyDeltas = flip $ foldr applyDelta
 
         propagateAndAccumulateDeltas :: forall f g. [BdyDelta f] -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
         propagateAndAccumulateDeltas deltas atom bdy =
-            concatMap (propagateDelta atom) deltas ++ backpropDelta atom bdy
+            concatMap (propagateDelta atom) deltas ++ backpropDelta baseWidth atom bdy
 
         propagateDeltasLO2C :: forall f g. [BdyDelta f] -> LayedOut2Cell f g -> LayedOut2Cell f g
         propagateDeltasLO2C deltas (NilIntl bdy) = NilIntl $ applyDeltas deltas bdy
@@ -264,13 +273,13 @@ layOut2Cell c = propagateDeltasLO2C [] $ interleaveInComposite backpropBoundary 
                 newbdy = applyDeltas deltas bdy
                 newdeltas = propagateAndAccumulateDeltas deltas atom (headInterleaved q)
 
-drawLO2C :: Point -> LayedOut2Cell f g -> Text
-drawLO2C p0 c =
+drawLO2C :: Point -> RenderOptions -> LayedOut2Cell f g -> Text
+drawLO2C p0 opts c =
     let (pend, output) = (\x -> execRWS x () p0) $ sequence_
             (iterInterleaved c $ \(bdyl, atom, bdyr) -> do
                 p <- get
-                tell $ draw2CellAtom p bdyl bdyr atom
-                put (translateh twoCellLength p)
+                tell $ draw2CellAtom opts p bdyl bdyr atom
+                put (translateh (renderLength2Cell opts) p)
             )
     in output
        <> drawBdyLabels (headInterleaved c) p0 "east"
