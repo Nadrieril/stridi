@@ -12,6 +12,7 @@ module StriDi.Render
 import Data.Kind (type Type)
 import Data.Type.Equality
 import Data.Proxy
+import Data.List
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
@@ -64,7 +65,7 @@ data RenderOptions = RenderOptions {
     renderWidth2Cell :: Rational,
     renderLength2Cell :: Rational
 }
-defaultRenderOpts = RenderOptions 1 1
+defaultRenderOpts = RenderOptions 1 0.8
 largeRenderOpts = RenderOptions 2 5
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
@@ -87,8 +88,6 @@ data TwoCellAtom (f :: a :-> b) (g :: a :-> b) = TwoCellAtom {
     outRep :: Sing1 g,
     label :: TwoCellData
 }
-
-type TwoCellCanonForm = Composite TwoCellAtom
 
 
 -- data Rep1 where
@@ -230,7 +229,11 @@ tensor2CellAtomR sx ca = ca {
 
 
 draw2CellAtom :: RenderOptions -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
-draw2CellAtom opts pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
+draw2CellAtom opts p0 bdyf bdyg atom =
+    draw2CellSlice opts p0 bdyf bdyg (atomToSlice atom)
+
+draw2CellAtom' :: RenderOptions -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom' f g -> Text
+draw2CellAtom' opts pl (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
     let pr = translateh (renderLength2Cell opts) pl
         popleft = do
             (p1, p2, bdyl, bdyr) <- get
@@ -243,10 +246,25 @@ draw2CellAtom opts pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
             put (p1, p2', bdyl, tail bdyr)
             return p2'
     in evalRWS' () (pl, pr, bdyl, bdyr) $ do
-        replicateM_ before $ do
+        replicateM_ (length1 f) $ do
             p1 <- popleft
             p2 <- popright
             tell $ mkLine "0" "180" p1 p2
+draw2CellAtom' opts pl (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
+    let pr = translateh (renderLength2Cell opts) pl
+        popleft = do
+            (p1, p2, bdyl, bdyr) <- get
+            let p1' = translatev (head bdyl) p1
+            put (p1', p2, tail bdyl, bdyr)
+            return p1'
+        popright = do
+            (p1, p2, bdyl, bdyr) <- get
+            let p2' = translatev (head bdyr) p2
+            put (p1, p2', bdyl, tail bdyr)
+            return p2'
+        inputs = length1 f
+        outputs = length1 g
+    in evalRWS' () (pl, pr, bdyl, bdyr) $ do
         (p1, _, bdyl, bdyr) <- get
         let width = case () of
                 _ | inputs == 0 && outputs == 0 -> head bdyl
@@ -262,10 +280,17 @@ draw2CellAtom opts pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
             let angle = if y p == y p2 then "0" else if y p < y p2 then "90" else "-90"
             tell $ mkLine angle "180" p p2
         tell $ mkNode p label
-        replicateM_ after $ do
-            p1 <- popleft
-            p2 <- popright
-            tell $ mkLine "0" "180" p1 p2
+
+draw2CellSlice :: RenderOptions -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> Text
+draw2CellSlice opts p0 bdyf bdyg (EmptySlice _) = ""
+draw2CellSlice opts p0 bdyf bdyg (ConsSlice atom q) = let
+        (bdySrcAtom, bdySrcQ) = splitBoundaryR (srcAtom' atom) (srcSlice q) bdyf
+        (bdyTgtAtom, bdyTgtQ) = splitBoundaryR (tgtAtom' atom) (tgtSlice q) bdyg
+        addToHead x l = [x + head l] ++ tail l
+        addToHeadBdy x (Bdy f bdy) = Bdy f $ addToHead x bdy
+        drawnAtom = draw2CellAtom' opts p0 bdySrcAtom bdyTgtAtom atom
+        drawnQ = draw2CellSlice opts p0 (addToHeadBdy (sum $ unBdy bdySrcAtom) bdySrcQ) (addToHeadBdy (sum $ unBdy bdyTgtAtom) bdyTgtQ) q
+    in drawnAtom <> drawnQ
 
 
 data TwoCellBoundary f = Bdy {
@@ -333,47 +358,104 @@ backpropBoundaryAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
     in Bdy f $ addToHead dhead $ addToTail dtail newbdy
 
 backpropBoundarySlice :: Rational -> TwoCellSlice f g -> TwoCellBoundary g -> TwoCellBoundary f
-backpropBoundarySlice baseWidth (EmptySlice _) bdy = bdy
-backpropBoundarySlice baseWidth (ConsSlice atom q) bdy = let
-        newbdy = mapBoundaryR (tgtAtom' atom) (tgtSlice q) (backpropBoundarySlice baseWidth q) bdy
-     in mapBoundaryL (tgtAtom' atom) (srcSlice q) (backpropBoundaryAtom baseWidth atom) newbdy
-
-
--- withFakeRep :: Int -> (forall a b (f :: a :-> b). Sing1 f -> r) -> r
--- withFakeRep n f = let
---         a = mkA0 (ZeroCellData "a")
---         c = mkA1 (OneCellData "c") a a
---     in case foldr cmpA1 (idA1 a) $ replicate n c of
---         A1Cell rep -> f rep
+backpropBoundarySlice baseWidth (EmptySlice _) = id
+backpropBoundarySlice baseWidth (ConsSlice atom q) =
+    mapBoundaryR (srcAtom' atom) (tgtSlice q) (backpropBoundarySlice baseWidth q)
+    . mapBoundaryL (tgtAtom' atom) (tgtSlice q) (backpropBoundaryAtom baseWidth atom)
 
 
 type BdyDelta f = (Int, Rational)
+type BdyDeltas f = [BdyDelta f]
 
-propagateDelta :: TwoCellAtom f g -> BdyDelta f -> [BdyDelta g]
-propagateDelta TwoCellAtom{..} (i, delta) =
-    if (inputs == 0 && i == before) || (before < i && i < before + inputs)
-       then [(before, delta/2), (before+outputs, delta/2)]
-    else if i >= before + inputs
+withFakeRep :: Int -> (forall a b (f :: a :-> b). Sing1 f -> r) -> r
+withFakeRep n f = let
+        a = mkA0 (ZeroCellData "a")
+        c = mkA1 (OneCellData "c") a a
+    in case foldr cmpA1 (idA1 a) $ replicate n c of
+        A1Cell rep -> f rep
+
+atomToSlice :: forall (f :: a :-> b) g. TwoCellAtom f g -> TwoCellSlice f g
+atomToSlice TwoCellAtom{..} =
+    withFakeRep before $ \(before :: Sing1 (before :: a0 :-> b0)) ->
+    withFakeRep inputs $ \(input :: Sing1 (input :: a1 :-> b1)) ->
+    withFakeRep outputs $ \(output :: Sing1 (output :: a2 :-> b2)) ->
+    withFakeRep after $ \(after :: Sing1 (after :: a3 :-> b3)) ->
+    case ( unsafeCoerce Refl :: (a :~: a0)
+         , unsafeCoerce Refl :: (b0 :~: a1)
+         , unsafeCoerce Refl :: (b0 :~: a2)
+         , unsafeCoerce Refl :: (b1 :~: a3)
+         , unsafeCoerce Refl :: (b2 :~: a3)
+         , unsafeCoerce Refl :: (b3 :~: b)
+         ) of
+      (Refl, Refl, Refl, Refl, Refl, Refl) ->
+        case ( unsafeCoerce Refl :: ((before `Cmp1` (input `Cmp1` (after `Cmp1` TId1))) :~: f)
+             , unsafeCoerce Refl :: ((before `Cmp1` (output `Cmp1` (after `Cmp1` TId1))) :~: g)
+             ) of
+          (Refl, Refl) ->
+              ConsSlice (IdAtom before) $ ConsSlice (MkAtom label input output) $ ConsSlice (IdAtom after) $ EmptySlice undefined
+
+propagateDeltaAtom :: TwoCellAtom' f g -> BdyDelta f -> [BdyDelta g]
+propagateDeltaAtom (IdAtom _) (i, delta) = [(i, delta)]
+propagateDeltaAtom (MkAtom _ f g) (i, delta) = let
+        inputs = length1 f
+        outputs = length1 g
+    in
+    -- If the delta is inside the cell, spread it out evenly to keep the cell centered;
+    -- otherwise, imply propagate it
+    if inputs > 0 && i == 0
+        then [(i, delta)]
+    else if inputs > 0 && i == inputs
        then [(i - inputs + outputs, delta)]
-    else [(i, delta)]
+    else [(0, delta/2), (outputs, delta/2)]
+
+mapDelta :: Sing1 f -> Sing1 f' -> Sing1 g -> Sing1 g'
+            -> (BdyDeltas f -> BdyDeltas f')
+            -> (BdyDeltas g -> BdyDeltas g')
+            -> BdyDeltas (f `Cmp1` g) -> BdyDeltas (f' `Cmp1` g')
+mapDelta f1 f2 g1 g2 mapf mapg deltas = let
+        nf1 = length1 f1
+        nf2 = length1 f2
+        (deltasf1, deltasg1) = partition (\(i, _) -> i <= nf1) deltas
+        deltasf2 = mapf deltasf1
+        deltasg2 = fmap (\(i, d) -> (i + nf2, d)) $ mapg $ fmap (\(i, d) -> (i - nf1, d)) deltasg1
+    in deltasf2 ++ deltasg2
+
+propagateDeltaSlice :: TwoCellSlice f g -> BdyDeltas f -> BdyDeltas g
+propagateDeltaSlice (EmptySlice _) = id
+propagateDeltaSlice (ConsSlice atom q) =
+    mapDelta (srcAtom' atom) (tgtAtom' atom) (srcSlice q) (tgtSlice q) (propagateDeltaAtom atom =<<) (propagateDeltaSlice q)
 
 applyDelta :: BdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
 applyDelta (i, delta) (Bdy sf bdy) =
     Bdy sf $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
-backpropDelta :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
-backpropDelta baseWidth TwoCellAtom{..} (unBdy -> bdy) = let
-        h = sum $ take (outputs+1) $ drop before bdy
+backpropDeltaAtom :: Rational -> TwoCellAtom' f g -> TwoCellBoundary g -> [BdyDelta g]
+backpropDeltaAtom baseWidth (IdAtom _) _ = []
+backpropDeltaAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
+        inputs = length1 f
+        outputs = length1 g
+        h = sum bdy
         newh = realToFrac (inputs+1) * baseWidth
      in if newh > h
-        then [(before, (newh - h)/2), (before + outputs, (newh - h)/2)]
+        then [(0, (newh - h)/2), (outputs, (newh - h)/2)]
         else []
+
+backpropDeltaSlice :: Rational -> TwoCellSlice f g -> TwoCellBoundary g -> [BdyDelta g]
+backpropDeltaSlice baseWidth (EmptySlice _) _ = []
+backpropDeltaSlice baseWidth (ConsSlice atom q) bdy = let
+        (bdyTgtAtom, _) = splitBoundaryR (tgtAtom' atom) (tgtSlice q) bdy
+        (_, bdyTgtQ) = splitBoundaryL (tgtAtom' atom) (tgtSlice q) bdy
+        deltasAtom = backpropDeltaAtom baseWidth atom bdyTgtAtom
+        deltasQ = backpropDeltaSlice baseWidth q bdyTgtQ
+     in deltasAtom ++ fmap (\(i, d) -> (i + length1 (srcAtom' atom), d)) deltasQ
 
 
 type LayedOut2Cell = Interleaved TwoCellAtom TwoCellBoundary
+type LayedOut2Cell' = Interleaved TwoCellSlice TwoCellBoundary
 
 layOut2Cell :: forall f g. Rational -> TwoCellCanonForm' f g -> LayedOut2Cell f g
-layOut2Cell baseWidth c = propagateDeltasLO2C [] $
+layOut2Cell baseWidth c =
+    propagateDeltasLO2C baseWidth [] $
     flatMapInterleaved (sliceToLO2C baseWidth) $
     interleaveInComposite (backpropBoundarySlice baseWidth) lastBdy $
     compositeFromInterleaved c
@@ -381,27 +463,27 @@ layOut2Cell baseWidth c = propagateDeltasLO2C [] $
         lastBdy :: TwoCellBoundary g
         lastBdy = defaultBoundary baseWidth $ lastInterleaved c
 
-        applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
-        applyDeltas = flip $ foldr applyDelta
+applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
+applyDeltas = flip $ foldr applyDelta
 
-        propagateAndAccumulateDeltas :: forall f g. [BdyDelta f] -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
-        propagateAndAccumulateDeltas deltas atom bdy =
-            concatMap (propagateDelta atom) deltas ++ backpropDelta baseWidth atom bdy
+propagateAndAccumulateDeltas :: forall f g. Rational -> [BdyDelta f] -> TwoCellSlice f g -> TwoCellBoundary g -> [BdyDelta g]
+propagateAndAccumulateDeltas baseWidth deltas s bdy =
+    propagateDeltaSlice s deltas ++ backpropDeltaSlice baseWidth s bdy
 
-        propagateDeltasLO2C :: forall f g. [BdyDelta f] -> LayedOut2Cell f g -> LayedOut2Cell f g
-        propagateDeltasLO2C deltas (NilIntl bdy) = NilIntl $ applyDeltas deltas bdy
-        propagateDeltasLO2C deltas (CmpIntl bdy (atom :: TwoCellAtom f h) q) =
-                CmpIntl newbdy atom $ propagateDeltasLO2C @h @g newdeltas q
-            where
-                newbdy = applyDeltas deltas bdy
-                newdeltas = propagateAndAccumulateDeltas deltas atom (headInterleaved q)
+propagateDeltasLO2C :: forall f g. Rational -> [BdyDelta f] -> LayedOut2Cell f g -> LayedOut2Cell f g
+propagateDeltasLO2C baseWidth deltas (NilIntl bdy) = NilIntl $ applyDeltas deltas bdy
+propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (atom :: TwoCellAtom f h) q) =
+        CmpIntl newbdy atom $ propagateDeltasLO2C @h @g baseWidth newdeltas q
+    where
+        newbdy = applyDeltas deltas bdy
+        newdeltas = propagateAndAccumulateDeltas baseWidth deltas (atomToSlice atom) (headInterleaved q)
 
 drawLO2C :: Point -> RenderOptions -> LayedOut2Cell f g -> Text
 drawLO2C p0 opts c =
     let (pend, output) = (\x -> execRWS x () p0) $ sequence_
             (iterInterleaved c $ \(bdyl, atom, bdyr) -> do
                 p <- get
-                tell $ draw2CellAtom opts p bdyl bdyr atom
+                tell $ draw2CellSlice opts p bdyl bdyr (atomToSlice atom)
                 put (translateh (renderLength2Cell opts) p)
             )
     in output
