@@ -41,6 +41,12 @@ type family Cmp1 (x :: a :-> b) (y :: b :-> c) :: a :-> c where
     Cmp1 TId1 y = y
     Cmp1 (TCons1 c q) y = TCons1 c (Cmp1 q y)
 
+unit1Proof :: Sing1 f -> (f `Cmp1` TId1) :~: f
+unit1Proof f = unsafeCoerce Refl
+
+assoc1Proof :: Sing1 f -> Sing1 g -> Sing1 h -> (f `Cmp1` g) `Cmp1` h :~: f `Cmp1` (g `Cmp1` h)
+assoc1Proof f g h = unsafeCoerce Refl
+
 
 -- Statically-typed
 data Sing0 (a :: ZeroCell) = Sing0 ZeroCellData

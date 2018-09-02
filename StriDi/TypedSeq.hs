@@ -6,6 +6,10 @@ data Composite f a b where
     NilCte :: Composite f a a
     CmpCte :: f a b -> Composite f b c -> Composite f a c
 
+headComposite :: Composite f a b -> (forall c. f a c -> r a) -> r a -> r a
+headComposite NilCte _ x = x
+headComposite (CmpCte fab _) f _ = f fab
+
 lastComposite :: Composite f a b -> (forall c. f c b -> r b) -> r b -> r b
 lastComposite NilCte _ x = x
 lastComposite (CmpCte fab NilCte) f _ = f fab
@@ -22,6 +26,10 @@ mergeComposite (CmpCte fab q) fbc = CmpCte fab $ mergeComposite q fbc
 singComposite :: f a b -> Composite f a b
 singComposite fab = CmpCte fab NilCte
 
+flatMapComposite :: (forall a b. f a b -> Composite g a b) -> Composite f a b -> Composite g a b
+flatMapComposite f NilCte = NilCte
+flatMapComposite f (CmpCte fab q) = mergeComposite (f fab) $ flatMapComposite f q
+
 
 data Interleaved f g a b where
     NilIntl :: g a -> Interleaved f g a a
@@ -37,8 +45,19 @@ lastInterleaved (CmpIntl _ _ q) = lastInterleaved q
 
 iterInterleaved :: Interleaved f g a b -> (forall a b. (g a, f a b, g b) -> r) -> [r]
 iterInterleaved (NilIntl ga) f = []
-iterInterleaved (CmpIntl ga fab (NilIntl gb)) f = [f (ga, fab, gb)]
-iterInterleaved (CmpIntl ga fab q@(CmpIntl gb _ _)) f = f (ga, fab, gb) : iterInterleaved q f
+iterInterleaved (CmpIntl ga fab q) f = f (ga, fab, headInterleaved q) : iterInterleaved q f
+
+mergeInterleaved :: Interleaved f g a b -> Interleaved f g b c -> Interleaved f g a c
+mergeInterleaved (NilIntl _) fbc = fbc
+mergeInterleaved (CmpIntl ga fab q) fbc = CmpIntl ga fab $ mergeInterleaved q fbc
+
+flatMapInterleaved :: (forall a b. f a b -> g a -> g b -> Interleaved f' g a b) -> Interleaved f g a b -> Interleaved f' g a b
+flatMapInterleaved f (NilIntl ga) = NilIntl ga
+flatMapInterleaved f (CmpIntl ga fab q) = mergeInterleaved (f fab ga (headInterleaved q)) $ flatMapInterleaved f q
 
 interleaveInComposite :: (forall a b c. f a b -> g b -> g a) -> g b -> Composite f a b -> Interleaved f g a b
 interleaveInComposite f x = foldComposite (\fab intbc -> CmpIntl (f fab (headInterleaved intbc)) fab intbc) (NilIntl x)
+
+compositeFromInterleaved :: Interleaved f g a b -> Composite f a b
+compositeFromInterleaved (NilIntl _) = NilCte
+compositeFromInterleaved (CmpIntl _ fab q) = CmpCte fab $ compositeFromInterleaved q

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
-    RecordWildCards, AllowAmbiguousTypes, ViewPatterns #-}
+    RecordWildCards, AllowAmbiguousTypes, ViewPatterns, TypeFamilies, TypeFamilyDependencies #-}
 module StriDi.Render
     ( draw2Cell
     , drawA2Cell
@@ -9,12 +9,15 @@ module StriDi.Render
     , largeRenderOpts
     ) where
 
-import qualified Data.Text as T
+import Data.Kind (type Type)
+import Data.Type.Equality
 import Data.Proxy
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
 import Control.Exception.Base (assert)
+import qualified Data.Text as T
+import Unsafe.Coerce (unsafeCoerce)
 import Text.LaTeX
 import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
 import Text.LaTeX.Base.Syntax (LaTeX(..))
@@ -61,21 +64,21 @@ data RenderOptions = RenderOptions {
     renderWidth2Cell :: Rational,
     renderLength2Cell :: Rational
 }
-defaultRenderOpts = RenderOptions 1 2
+defaultRenderOpts = RenderOptions 1 1
 largeRenderOpts = RenderOptions 2 5
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
     . drawLO2C (Point 0 0) opts
     . layOut2Cell (renderWidth2Cell opts)
-    . twoCellToCanonForm
+    . twoCellToCanonForm'
 
 drawA2Cell :: LaTeXC l => RenderOptions -> A2Cell -> l
 drawA2Cell opts (A2Cell c) = draw2Cell opts c
 
 
 
-data TwoCellAtom f g = TwoCellAtom {
+data TwoCellAtom (f :: a :-> b) (g :: a :-> b) = TwoCellAtom {
     before :: Int,
     after :: Int,
     inputs :: Int,
@@ -85,19 +88,131 @@ data TwoCellAtom f g = TwoCellAtom {
     label :: TwoCellData
 }
 
-totalInputs :: TwoCellAtom f g -> Int
-totalInputs TwoCellAtom{..} = before + inputs + after
+type TwoCellCanonForm = Composite TwoCellAtom
 
-totalOutputs :: TwoCellAtom f g -> Int
-totalOutputs TwoCellAtom{..} = before + outputs + after
 
-flip2CellAtom :: TwoCellAtom f g -> TwoCellAtom g f
-flip2CellAtom ca@TwoCellAtom{..} = ca {
-    inputs = outputs,
-    outputs = inputs,
-    inRep = outRep,
-    outRep = inRep
+-- data Rep1 where
+--     RSing1 :: Rep1
+
+-- type family UnRep1 (rep :: Rep1) (f :: a :-> b) :: (r :: Type) | r -> rep f where
+--     UnRep1 RSing1 f = Sing1 f
+
+-- class IsRep1 (rep :: Rep1) where
+-- --     data UnRep1 rep :: (a :-> b) -> Type
+--     singRep1 :: UnRep1 rep f -> Sing1 f
+--     idRep1 :: Sing0 a -> UnRep1 rep (TId1 :: a :-> a)
+--     cmpRep1 :: UnRep1 rep f -> UnRep1 rep g -> UnRep1 rep (f `Cmp1` g)
+
+-- instance IsRep1 RSing1 where
+-- --     data UnRep1 RSing1 f = URSing1 (Sing1 f)
+--     singRep1 = id
+--     idRep1 = Id1
+--     cmpRep1 = cmp1
+
+data TwoCellAtom' (f :: a :-> b) (g :: a :-> b) where
+    IdAtom :: Sing1 f -> TwoCellAtom' f f
+    MkAtom :: TwoCellData -> Sing1 f -> Sing1 g -> TwoCellAtom' f g
+
+data TwoCellSlice (f :: a :-> b) (g :: a :-> b) where
+    EmptySlice :: Sing0 a -> TwoCellSlice (TId1 :: a :-> a) (TId1 :: a :-> a)
+    ConsSlice :: TwoCellAtom' (f :: a :-> b) (g :: a :-> b)
+            -> TwoCellSlice h i -> TwoCellSlice (f `Cmp1` h) (g `Cmp1` i)
+
+type TwoCellCanonForm' = Interleaved TwoCellSlice Sing1
+
+
+srcAtom :: TwoCellAtom f g -> Sing1 f
+srcAtom = inRep
+
+tgtAtom :: TwoCellAtom f g -> Sing1 g
+tgtAtom = outRep
+
+srcAtom' :: TwoCellAtom' f g -> Sing1 f
+srcAtom' (IdAtom f) = f
+srcAtom' (MkAtom _ f _) = f
+
+tgtAtom' :: TwoCellAtom' f g -> Sing1 g
+tgtAtom' (IdAtom f) = f
+tgtAtom' (MkAtom _ _ g) = g
+
+srcSlice :: TwoCellSlice f g -> Sing1 f
+srcSlice (EmptySlice a) = Id1 a
+srcSlice (ConsSlice atom q) = srcAtom' atom `cmp1` srcSlice q
+
+tgtSlice :: TwoCellSlice f g -> Sing1 g
+tgtSlice (EmptySlice a) = Id1 a
+tgtSlice (ConsSlice atom q) = tgtAtom' atom `cmp1` tgtSlice q
+
+singSlice :: TwoCellAtom' f g -> TwoCellSlice f g
+singSlice atom =
+    case unit1Proof (srcAtom' atom) of
+      Refl -> case unit1Proof (tgtAtom' atom) of
+        Refl -> ConsSlice atom (EmptySlice $ tgt1 $ srcAtom' atom)
+
+idSlice :: Sing1 f -> TwoCellSlice f f
+idSlice f = singSlice (IdAtom f)
+
+tensorSlice :: TwoCellSlice f g -> TwoCellSlice h i -> TwoCellSlice (f `Cmp1` h) (g `Cmp1` i)
+tensorSlice (EmptySlice _) s = s
+tensorSlice (ConsSlice atom q) s2 =
+    case assoc1Proof (srcAtom' atom) (srcSlice q) (srcSlice s2) of
+        Refl -> case assoc1Proof (tgtAtom' atom) (tgtSlice q) (tgtSlice s2) of
+            Refl -> ConsSlice atom $ tensorSlice q s2
+
+
+atomPrimeToAtom :: TwoCellAtom' f g -> TwoCellAtom f g
+atomPrimeToAtom (IdAtom f) = TwoCellAtom {
+    before = length1 f,
+    after = 0,
+    inputs = 0,
+    outputs = 0,
+    inRep = f,
+    outRep = f,
+    label = TwoCellData "id"
 }
+atomPrimeToAtom (MkAtom d f g) = TwoCellAtom {
+    before = 0,
+    after = 0,
+    inputs = length1 f,
+    outputs = length1 g,
+    inRep = f,
+    outRep = g,
+    label = d
+}
+
+tensorCanonForm' :: TwoCellCanonForm' f g -> TwoCellCanonForm' h i -> TwoCellCanonForm' (f `Cmp1` h) (g `Cmp1` i)
+tensorCanonForm' (NilIntl f) (NilIntl h) =
+    NilIntl (f `cmp1` h)
+tensorCanonForm' (NilIntl f) (CmpIntl h s q) =
+    CmpIntl (f `cmp1` h) (tensorSlice (idSlice f) s) (tensorCanonForm' (NilIntl f) q)
+tensorCanonForm' (CmpIntl f s q) (NilIntl h) =
+    CmpIntl (f `cmp1` h) (tensorSlice s (idSlice h)) (tensorCanonForm' q (NilIntl h))
+tensorCanonForm' (CmpIntl f s1 q1) (CmpIntl h s2 q2) =
+    CmpIntl (f `cmp1` h) (tensorSlice s1 s2) (tensorCanonForm' q1 q2)
+
+sliceToLO2C :: Rational -> TwoCellSlice f g -> TwoCellBoundary f -> TwoCellBoundary g -> LayedOut2Cell f g
+sliceToLO2C baseWidth (EmptySlice _) bdyf bdyg = NilIntl bdyf
+sliceToLO2C baseWidth (ConsSlice atom q) bdyf bdyg =
+    let (_, bdySrcQ) = splitBoundaryR (srcAtom' atom) (srcSlice q) bdyf
+        (bdyTgtAtom, bdyTgtQ) = splitBoundaryL (tgtAtom' atom) (tgtSlice q) bdyg
+        qLO2C = sliceToLO2C baseWidth q bdySrcQ bdyTgtQ
+        midbdy = bdyTgtAtom `mergeBoundary` headInterleaved qLO2C
+     in CmpIntl
+        (mapBoundaryL (tgtAtom' atom) (srcSlice q) (backpropBoundaryAtom baseWidth atom) midbdy)
+        (tensor2CellAtomR (srcSlice q) $ atomPrimeToAtom atom)
+        (tensorLO2CL bdyTgtAtom qLO2C)
+
+
+tensorLO2CL :: TwoCellBoundary x -> LayedOut2Cell f g -> LayedOut2Cell (x `Cmp1` f) (x `Cmp1` g)
+tensorLO2CL topbdy (NilIntl bdy) = NilIntl (topbdy `mergeBoundary` bdy)
+tensorLO2CL topbdy (CmpIntl bdy atom q) = CmpIntl (topbdy `mergeBoundary` bdy) (tensor2CellAtomL (repBdy topbdy) atom) $ tensorLO2CL topbdy q
+
+twoCellToCanonForm' :: f :--> g -> TwoCellCanonForm' f g
+twoCellToCanonForm' (Id2 f) = CmpIntl f (singSlice $ IdAtom f) $ NilIntl f
+twoCellToCanonForm' (Mk2 n f g) = CmpIntl f (singSlice $ MkAtom n f g) $ NilIntl g
+twoCellToCanonForm' (Cmp2 c1 c2) = twoCellToCanonForm' c1 `mergeInterleaved` twoCellToCanonForm' c2
+twoCellToCanonForm' (Tensor2 c1 c2) = twoCellToCanonForm' c1 `tensorCanonForm'` twoCellToCanonForm' c2
+
 
 tensor2CellAtomL :: forall x f g. Sing1 x -> TwoCellAtom f g -> TwoCellAtom (x `Cmp1` f) (x `Cmp1` g)
 tensor2CellAtomL sx ca = ca {
@@ -113,37 +228,6 @@ tensor2CellAtomR sx ca = ca {
         outRep = outRep ca `cmp1` sx
     }
 
-
-type TwoCellCanonForm = Composite TwoCellAtom
-
-tensorCanonFormL :: forall x f g. Sing1 x -> TwoCellCanonForm f g -> TwoCellCanonForm (x `Cmp1` f) (x `Cmp1` g)
-tensorCanonFormL sx NilCte = NilCte
-tensorCanonFormL sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomL @x sx atom) $ tensorCanonFormL @x sx q
-
-tensorCanonFormR :: forall x f g. Sing1 x -> TwoCellCanonForm f g -> TwoCellCanonForm (f `Cmp1` x) (g `Cmp1` x)
-tensorCanonFormR sx NilCte = NilCte
-tensorCanonFormR sx (CmpCte (atom :: TwoCellAtom f h) q) = CmpCte (tensor2CellAtomR @x sx atom) $ tensorCanonFormR @x sx q
-
-twoCellToCanonForm :: f :--> g -> TwoCellCanonForm f g
-twoCellToCanonForm (Id2 sf) = twoCellToCanonForm (Mk2 (TwoCellData "id") sf sf)
-twoCellToCanonForm (Mk2 n sf sg) = singComposite $ TwoCellAtom {
-        before = 0,
-        after = 0,
-        inputs = length1 sf,
-        outputs = length1 sg,
-        inRep = sf,
-        outRep = sg,
-        label = n
-    }
-twoCellToCanonForm (Cmp2 c1 c2) = (twoCellToCanonForm c1) `mergeComposite` (twoCellToCanonForm c2)
-twoCellToCanonForm (Tensor2 (Id2 sf :: f :--> g) (c2 :: f' :--> g')) =
-    tensorCanonFormL @f sf $ twoCellToCanonForm c2
-twoCellToCanonForm (Tensor2 (c1 :: f :--> g) (Id2 sf :: f' :--> g')) =
-    tensorCanonFormR @f' sf $ twoCellToCanonForm c1
-twoCellToCanonForm (Tensor2 (c1 :: f1 :--> g1) (c2 :: f2 :--> g2)) =
-    twoCellToCanonForm $
-        (c1 `Tensor2` Id2 @f2 (src2 c2))
-        `Cmp2` (Id2 @g1 (tgt2 c1) `Tensor2` c2)
 
 draw2CellAtom :: RenderOptions -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
 draw2CellAtom opts pl (unBdy -> bdyl) (unBdy -> bdyr) TwoCellAtom{..} =
@@ -189,42 +273,78 @@ data TwoCellBoundary f = Bdy {
     unBdy :: [Rational]
 }
 
-defaultBoundary :: Rational -> TwoCellAtom f g -> TwoCellBoundary g
-defaultBoundary baseWidth ca = Bdy (outRep ca) $ replicate (totalOutputs ca+1) baseWidth
+defaultBoundary :: Rational -> Sing1 f -> TwoCellBoundary f
+defaultBoundary baseWidth f = Bdy f $ replicate (length1 f + 1) baseWidth
 
-backpropBoundary :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBoundary f
-backpropBoundary baseWidth ca@TwoCellAtom{..} bdy = let
-        (bdybefore, mid, bdyafter) = projectBdyR ca bdy
-        h = case mid of
-              Left h -> h
-              Right (x1, mid, x2) -> x1 + sum mid + x2
-        newh = realToFrac (inputs + 1) * baseWidth
-        newmid = if inputs == 0 then [h] else let
-                newmid = replicate (inputs - 1) baseWidth
-                (x1, x2) = case mid of
-                    _ | newh > h -> (baseWidth, baseWidth)
-                    Left h -> (baseWidth + (h - newh)/2, baseWidth + (h - newh)/2)
-                    Right (x1, mid, x2) -> let
-                        outWidth = sum mid
-                        inWidth = sum newmid
-                      in (x1 + (outWidth - inWidth) / 2, x2 + (outWidth - inWidth) / 2)
-            in [x1] ++ newmid ++ [x2]
-    in Bdy inRep $ bdybefore ++ newmid ++ bdyafter
+splitBoundaryL :: Sing1 f -> Sing1 g -> TwoCellBoundary (f `Cmp1` g) -> (TwoCellBoundary f, TwoCellBoundary g)
+splitBoundaryL f g (Bdy _ l) = let
+        n = length1 f
+        before = take n l
+        mid = l !! n
+        after = drop (n + 1) l
+    in ( Bdy f (before ++ [0])
+        , Bdy g ([mid] ++ after))
 
-projectBdyL :: TwoCellAtom f g -> TwoCellBoundary f ->
-        ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-projectBdyL = projectBdyR . flip2CellAtom
+splitBoundaryR :: Sing1 f -> Sing1 g -> TwoCellBoundary (f `Cmp1` g) -> (TwoCellBoundary f, TwoCellBoundary g)
+splitBoundaryR f g (Bdy _ l) = let
+        n = length1 f
+        before = take n l
+        mid = l !! n
+        after = drop (n + 1) l
+    in ( Bdy f (before ++ [mid])
+        , Bdy g ([0] ++ after))
 
-projectBdyR :: TwoCellAtom f g -> TwoCellBoundary g ->
-        ([Rational], Either Rational (Rational, [Rational], Rational), [Rational])
-projectBdyR TwoCellAtom{..} (unBdy -> bdy) =
-    let (bdybefore, (mid, bdyafter)) =
-            fmap (splitAt (outputs+1)) $ splitAt before bdy
-     in (bdybefore,
-        if outputs == 0
-           then Left (head mid)
-           else Right (head mid, tail $ init mid, last mid),
-        bdyafter)
+mapBoundaryR :: Sing1 f -> Sing1 g -> (TwoCellBoundary g -> TwoCellBoundary h)
+                -> TwoCellBoundary (f `Cmp1` g) -> TwoCellBoundary (f `Cmp1` h)
+mapBoundaryR f g map bdy = let
+    (bdyf, bdyg) = splitBoundaryL f g bdy
+    in bdyf `mergeBoundary` map bdyg
+
+mapBoundaryL :: Sing1 f -> Sing1 g -> (TwoCellBoundary f -> TwoCellBoundary h)
+                -> TwoCellBoundary (f `Cmp1` g) -> TwoCellBoundary (h `Cmp1` g)
+mapBoundaryL f g map bdy = let
+    (bdyf, bdyg) = splitBoundaryR f g bdy
+    in map bdyf `mergeBoundary` bdyg
+
+
+
+mergeBoundary :: TwoCellBoundary f -> TwoCellBoundary g -> TwoCellBoundary (f `Cmp1` g)
+mergeBoundary (Bdy f lf) (Bdy g lg) = Bdy (f `cmp1` g) (init lf ++ [last lf + head lg] ++ tail lg)
+
+backpropBoundaryAtom :: Rational -> TwoCellAtom' f g -> TwoCellBoundary g -> TwoCellBoundary f
+backpropBoundaryAtom baseWidth (IdAtom _) bdy = bdy
+backpropBoundaryAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
+        inputs = length1 f
+        outputs = length1 g
+        outputWidth = sum bdy
+        inputWidth = realToFrac (inputs + 1) * baseWidth
+
+        addToHead x l = [x + head l] ++ tail l
+        addToTail x l = init l ++ [x + last l]
+        newbdy = replicate (inputs + 1) baseWidth
+        -- If there is already enough space to fit the cell, spread the leftover space evenly,
+        -- so that the cell remains centered wrt its outputs.
+        -- we use addToHead/addToTail because bdy may have length 1
+        deltaWidth = outputWidth - inputWidth
+        (dhead, dtail) = if deltaWidth < 0
+            then (0, 0)
+            else let (x1, x2) = (head bdy, last bdy)
+                  in (deltaWidth/2 + x1 - (x1 + x2) / 2 , deltaWidth/2 + x2 - (x1 + x2) / 2)
+    in Bdy f $ addToHead dhead $ addToTail dtail newbdy
+
+backpropBoundarySlice :: Rational -> TwoCellSlice f g -> TwoCellBoundary g -> TwoCellBoundary f
+backpropBoundarySlice baseWidth (EmptySlice _) bdy = bdy
+backpropBoundarySlice baseWidth (ConsSlice atom q) bdy = let
+        newbdy = mapBoundaryR (tgtAtom' atom) (tgtSlice q) (backpropBoundarySlice baseWidth q) bdy
+     in mapBoundaryL (tgtAtom' atom) (srcSlice q) (backpropBoundaryAtom baseWidth atom) newbdy
+
+
+-- withFakeRep :: Int -> (forall a b (f :: a :-> b). Sing1 f -> r) -> r
+-- withFakeRep n f = let
+--         a = mkA0 (ZeroCellData "a")
+--         c = mkA1 (OneCellData "c") a a
+--     in case foldr cmpA1 (idA1 a) $ replicate n c of
+--         A1Cell rep -> f rep
 
 
 type BdyDelta f = (Int, Rational)
@@ -252,11 +372,14 @@ backpropDelta baseWidth TwoCellAtom{..} (unBdy -> bdy) = let
 
 type LayedOut2Cell = Interleaved TwoCellAtom TwoCellBoundary
 
-layOut2Cell :: forall f g. Rational -> TwoCellCanonForm f g -> LayedOut2Cell f g
-layOut2Cell baseWidth c = propagateDeltasLO2C [] $ interleaveInComposite (backpropBoundary baseWidth) lastBdy c
+layOut2Cell :: forall f g. Rational -> TwoCellCanonForm' f g -> LayedOut2Cell f g
+layOut2Cell baseWidth c = propagateDeltasLO2C [] $
+    flatMapInterleaved (sliceToLO2C baseWidth) $
+    interleaveInComposite (backpropBoundarySlice baseWidth) lastBdy $
+    compositeFromInterleaved c
     where
         lastBdy :: TwoCellBoundary g
-        lastBdy = lastComposite c (defaultBoundary baseWidth) undefined
+        lastBdy = defaultBoundary baseWidth $ lastInterleaved c
 
         applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
         applyDeltas = flip $ foldr applyDelta
