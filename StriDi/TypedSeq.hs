@@ -51,6 +51,10 @@ mergeInterleaved :: Interleaved f g a b -> Interleaved f g b c -> Interleaved f 
 mergeInterleaved (NilIntl _) fbc = fbc
 mergeInterleaved (CmpIntl ga fab q) fbc = CmpIntl ga fab $ mergeInterleaved q fbc
 
+mapInterleaved :: (forall a b. f a b -> f' a b) -> Interleaved f g a b -> Interleaved f' g a b
+mapInterleaved f (NilIntl ga) = NilIntl ga
+mapInterleaved f (CmpIntl ga fab q) = CmpIntl ga (f fab) $ mapInterleaved f q
+
 flatMapInterleaved :: (forall a b. f a b -> g a -> g b -> Interleaved f' g a b) -> Interleaved f g a b -> Interleaved f' g a b
 flatMapInterleaved f (NilIntl ga) = NilIntl ga
 flatMapInterleaved f (CmpIntl ga fab q) = mergeInterleaved (f fab ga (headInterleaved q)) $ flatMapInterleaved f q
