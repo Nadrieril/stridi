@@ -13,6 +13,7 @@ import Data.Kind (type Type)
 import Data.Type.Equality
 import Data.Proxy
 import Data.List
+import Control.Arrow ((***))
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
@@ -267,8 +268,14 @@ backpropBoundarySlice baseWidth (ConsSlice atom q) =
     . mapBoundaryL (tgtAtom atom) (tgtSlice q) (backpropBoundaryAtom baseWidth atom)
 
 
+data TwoCellBdyDelta f = BdyDelta {
+    deltaRep :: Sing1 f,
+    unDelta :: [(Int, Rational)]
+}
 type BdyDelta f = (Int, Rational)
-type BdyDeltas f = [BdyDelta f]
+
+nilDelta :: Sing1 f -> TwoCellBdyDelta f
+nilDelta f = BdyDelta f []
 
 propagateDeltaAtom :: TwoCellAtom f g -> BdyDelta f -> [BdyDelta g]
 propagateDeltaAtom (IdAtom _) (i, delta) = [(i, delta)]
@@ -284,94 +291,88 @@ propagateDeltaAtom (MkAtom _ f g) (i, delta) = let
        then [(i - inputs + outputs, delta)]
     else [(0, delta/2), (outputs, delta/2)]
 
-mapDelta :: Sing1 f -> Sing1 f' -> Sing1 g -> Sing1 g'
-            -> (BdyDeltas f -> BdyDeltas f')
-            -> (BdyDeltas g -> BdyDeltas g')
-            -> BdyDeltas (f `Cmp1` g) -> BdyDeltas (f' `Cmp1` g')
-mapDelta f1 f2 g1 g2 mapf mapg deltas = let
-        nf1 = length1 f1
-        nf2 = length1 f2
-        (deltasf1, deltasg1) = partition (\(i, _) -> i <= nf1) deltas
-        deltasf2 = mapf deltasf1
-        deltasg2 = fmap (\(i, d) -> (i + nf2, d)) $ mapg $ fmap (\(i, d) -> (i - nf1, d)) deltasg1
-    in deltasf2 ++ deltasg2
+mergeDeltas :: TwoCellBdyDelta f -> TwoCellBdyDelta f -> TwoCellBdyDelta f
+mergeDeltas (BdyDelta f d1) (BdyDelta _ d2) = BdyDelta f $ d1 ++ d2
 
-propagateDeltaSlice :: TwoCellSlice f g -> BdyDeltas f -> BdyDeltas g
+concatDeltas :: Sing1 f -> [TwoCellBdyDelta f] -> TwoCellBdyDelta f
+concatDeltas f = foldr mergeDeltas (nilDelta f)
+
+tensorDeltas :: TwoCellBdyDelta f -> TwoCellBdyDelta g -> TwoCellBdyDelta (f `Cmp1` g)
+tensorDeltas (BdyDelta f deltasf) (BdyDelta g deltasg) =
+    BdyDelta (f `cmp1` g) $ deltasf ++ fmap (\(i, d) -> (i + length1 f, d)) deltasg
+
+splitDeltas :: Sing1 f -> Sing1 g -> TwoCellBdyDelta (f `Cmp1` g) -> (TwoCellBdyDelta f, TwoCellBdyDelta g)
+splitDeltas f g (unDelta -> deltas) = let
+        nf = length1 f
+        (deltasf, deltasg) = partition (\(i, _) -> i <= nf) deltas
+    in (BdyDelta f deltasf, BdyDelta g $ fmap (\(i, d) -> (i - nf, d)) deltasg)
+
+mapDeltas :: Sing1 f -> Sing1 f' -> Sing1 g -> Sing1 g'
+            -> (TwoCellBdyDelta f -> TwoCellBdyDelta f')
+            -> (TwoCellBdyDelta g -> TwoCellBdyDelta g')
+            -> TwoCellBdyDelta (f `Cmp1` g) -> TwoCellBdyDelta (f' `Cmp1` g')
+mapDeltas f1 f2 g1 g2 mapf mapg = uncurry tensorDeltas . (mapf *** mapg) . splitDeltas f1 g1
+
+propagateDeltaSlice :: TwoCellSlice f g -> TwoCellBdyDelta f -> TwoCellBdyDelta g
 propagateDeltaSlice (EmptySlice _) = id
 propagateDeltaSlice (ConsSlice atom q) =
-    mapDelta (srcAtom atom) (tgtAtom atom) (srcSlice q) (tgtSlice q) (propagateDeltaAtom atom =<<) (propagateDeltaSlice q)
+    mapDeltas (srcAtom atom) (tgtAtom atom) (srcSlice q) (tgtSlice q)
+        (BdyDelta (tgtAtom atom) . concatMap (propagateDeltaAtom atom) . unDelta)
+        (propagateDeltaSlice q)
 
-applyDelta :: BdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
-applyDelta (i, delta) (Bdy sf bdy) =
-    Bdy sf $ take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
-
-backpropDeltaAtom :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> [BdyDelta g]
-backpropDeltaAtom baseWidth (IdAtom _) _ = []
-backpropDeltaAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
+generateDeltaAtom :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> TwoCellBdyDelta g
+generateDeltaAtom baseWidth (IdAtom f) _ = nilDelta f
+generateDeltaAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
         inputs = length1 f
         outputs = length1 g
         h = sum bdy
         newh = realToFrac (inputs+1) * baseWidth
-     in if newh > h
-        then [(0, (newh - h)/2), (outputs, (newh - h)/2)]
-        else []
+     in BdyDelta g $ if newh > h
+            then [(0, (newh - h)/2), (outputs, (newh - h)/2)]
+            else []
 
-backpropDeltaSlice :: Rational -> TwoCellSlice f g -> TwoCellBoundary g -> [BdyDelta g]
-backpropDeltaSlice baseWidth (EmptySlice _) _ = []
-backpropDeltaSlice baseWidth (ConsSlice atom q) bdy = let
-        (bdyTgtAtom, _) = splitBoundaryR (tgtAtom atom) (tgtSlice q) bdy
-        (_, bdyTgtQ) = splitBoundaryL (tgtAtom atom) (tgtSlice q) bdy
-        deltasAtom = backpropDeltaAtom baseWidth atom bdyTgtAtom
-        deltasQ = backpropDeltaSlice baseWidth q bdyTgtQ
-     in deltasAtom ++ fmap (\(i, d) -> (i + length1 (srcAtom atom), d)) deltasQ
+generateDeltaSlice :: forall f g. Rational -> TwoCellSlice f g -> TwoCellBoundary g -> TwoCellBdyDelta g
+generateDeltaSlice baseWidth s bdy = snd (aux s bdy)
+    where
+        aux :: forall f g. TwoCellSlice f g -> TwoCellBoundary g -> (TwoCellBoundary f, TwoCellBdyDelta g)
+        aux (EmptySlice a) bdy = (bdy, nilDelta $ Id1 a)
+        aux s@(ConsSlice atom q) bdy =
+            let (bdyTgtAtom, bdyTgtQ) = splitBoundaryL (tgtAtom atom) (tgtSlice q) bdy
+                (bdySrcQ, deltasQ) = aux q bdyTgtQ
+                midbdy = bdyTgtAtom `mergeBoundary` bdySrcQ
+                (bdyTgtAtom2, bdySrcQ2) = splitBoundaryR (tgtAtom atom) (srcSlice q) midbdy
+                deltasAtom = generateDeltaAtom baseWidth atom bdyTgtAtom2
+             in ( backpropBoundaryAtom baseWidth atom bdyTgtAtom2 `mergeBoundary` bdySrcQ2
+                , tensorDeltas deltasAtom deltasQ)
 
 
 type LayedOut2Cell = Interleaved TwoCellSlice TwoCellBoundary
 
 layOut2Cell :: forall f g. Rational -> TwoCellCanonForm f g -> LayedOut2Cell f g
 layOut2Cell baseWidth c =
-    propagateDeltasLO2C baseWidth [] $
+    propagateDeltasLO2C baseWidth (nilDelta $ headInterleaved c) $
     interleaveInComposite (backpropBoundarySlice baseWidth) lastBdy $
     compositeFromInterleaved c
     where
         lastBdy :: TwoCellBoundary g
         lastBdy = defaultBoundary baseWidth $ lastInterleaved c
 
-applyDeltas :: forall f. [BdyDelta f] -> TwoCellBoundary f -> TwoCellBoundary f
-applyDeltas = flip $ foldr applyDelta
 
-propagateAndAccumulateDeltas :: forall f g. Rational -> [BdyDelta f] -> TwoCellSlice f g -> TwoCellBoundary g -> [BdyDelta g]
-propagateAndAccumulateDeltas baseWidth deltas s bdy =
-    propagateDeltaSlice s deltas ++ backpropDeltaSlice baseWidth s bdy
+applyDeltas :: forall f. TwoCellBdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
+applyDeltas (BdyDelta f1 deltas) (Bdy f2 bdy) = Bdy f2 $ foldr aux bdy deltas
+    where
+        aux (i, delta) bdy = take i bdy ++ [bdy!!i + delta] ++ drop (i+1) bdy
 
--- Peel off the slices atom per atom
-propagateDeltasLO2C :: forall f g. Rational -> BdyDeltas f -> LayedOut2Cell f g -> LayedOut2Cell f g
+propagateAndAccumulateDeltas :: forall f g. Rational -> TwoCellBdyDelta f -> TwoCellSlice f g -> TwoCellBoundary g -> TwoCellBdyDelta g
+propagateAndAccumulateDeltas baseWidth deltas s bdyg =
+    propagateDeltaSlice s deltas `mergeDeltas` generateDeltaSlice baseWidth s bdyg
+
+propagateDeltasLO2C :: forall f g. Rational -> TwoCellBdyDelta f -> LayedOut2Cell f g -> LayedOut2Cell f g
 propagateDeltasLO2C baseWidth deltas (NilIntl bdy) = NilIntl $ applyDeltas deltas bdy
-propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (EmptySlice _) q) =
-    propagateDeltasLO2C baseWidth deltas q
-propagateDeltasLO2C baseWidth deltas (CmpIntl bdy s@(ConsSlice (MkAtom _ f _) innerq) q) =
-    propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (ConsSlice (IdAtom (Id1 (src1 f))) s) q)
-propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (ConsSlice (IdAtom _) (EmptySlice _)) q) =
-    propagateDeltasLO2C baseWidth deltas q
-propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (ConsSlice (IdAtom f) (ConsSlice (IdAtom g) q)) outerq) =
-    case assoc1Proof f g (srcSlice q) of
-        Refl -> case assoc1Proof f g (tgtSlice q) of
-            Refl -> propagateDeltasLO2C baseWidth deltas (CmpIntl bdy (ConsSlice (IdAtom (f `cmp1` g)) q) outerq)
-propagateDeltasLO2C baseWidth deltas
-    (CmpIntl bdy
-      (ConsSlice (IdAtom (f :: Sing1 f1))
-        (ConsSlice (atom :: TwoCellAtom f2 g2)
-          (q :: TwoCellSlice f3 g3)))
-      (outerq :: LayedOut2Cell f4 g4)) =
-    let
-        s0 = ConsSlice (IdAtom f) $ ConsSlice atom $ idSlice (srcSlice q)
-        s1 = case assoc1Proof f (tgtAtom atom) (srcSlice q) of
-            Refl -> case assoc1Proof f (tgtAtom atom) (tgtSlice q) of
-                Refl -> ConsSlice (IdAtom (f `cmp1` tgtAtom atom)) q
-        bdy0 = applyDeltas deltas bdy
-        bdy1 = backpropBoundarySlice baseWidth s1 (headInterleaved outerq)
-        newdeltas = propagateAndAccumulateDeltas baseWidth deltas s0 bdy1
-     in CmpIntl bdy0 s0 $ propagateDeltasLO2C baseWidth newdeltas (CmpIntl bdy1 s1 outerq)
+propagateDeltasLO2C baseWidth deltas (CmpIntl bdy s q) = let
+        newdeltas = propagateAndAccumulateDeltas baseWidth deltas s (headInterleaved q)
+        newbdy = applyDeltas deltas bdy
+     in CmpIntl newbdy s $ propagateDeltasLO2C baseWidth newdeltas q
 
 
 drawLO2C :: Point -> RenderOptions -> LayedOut2Cell f g -> Text
