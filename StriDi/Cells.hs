@@ -7,6 +7,7 @@ import Data.Type.Equality
 import Data.Promotion.Prelude.List
 import Data.Monoid ((<>))
 import Data.Proxy
+import Data.List
 import qualified Data.Text as T
 import Data.Text (Text)
 import Unsafe.Coerce (unsafeCoerce)
@@ -20,11 +21,13 @@ data ZeroCellData = ZeroCellData {
 } deriving (Eq)
 
 data OneCellData = OneCellData {
-    label1 :: LaTeX
+    label1 :: LaTeX,
+    tikzOptions1 :: [Text]
 } deriving (Eq, Show)
 
 data TwoCellData = TwoCellData {
-    label2 :: LaTeX
+    label2 :: LaTeX,
+    tikzOptions2 :: [Text]
 } deriving (Eq)
 
 
@@ -188,9 +191,9 @@ cmpA2 (A2Cell c1) (A2Cell c2) =
         Just (Refl, Refl) -> case testEquality (tgt2 c1) (src2 c2) of
             Just Refl -> A2Cell (c1 `Cmp2` c2)
             Nothing -> error $ "Type error in cmpA2: cannot match "
-                               ++ show (list1Cells $ tgt2 c1) ++ " and " ++ show (list1Cells $ src2 c2)
+                               ++ show (show1CellLabel $ tgt2 c1) ++ " and " ++ show (show1CellLabel $ src2 c2)
         Nothing -> error $ "Type error in cmpA2: cannot match types of "
-                            ++ show (list1Cells $ tgt2 c1) ++ " and " ++ show (list1Cells $ src2 c2)
+                            ++ show (show1CellLabel $ tgt2 c1) ++ " and " ++ show (show1CellLabel $ src2 c2)
 
 tensorA2 :: A2Cell -> A2Cell -> A2Cell
 tensorA2 (A2Cell c1) (A2Cell c2) =
@@ -198,3 +201,9 @@ tensorA2 (A2Cell c1) (A2Cell c2) =
         Just Refl -> A2Cell (c1 `Tensor2` c2)
         Nothing -> error "Type error in tensorA2"
 
+
+show1CellLabel :: Sing1 f -> String
+show1CellLabel c = intercalate (" . ") $ fmap (show . label1) $ list1Cells c
+
+latex1CellLabel :: Sing1 f -> LaTeX
+latex1CellLabel c = mconcat $ intersperse (raw " \\circ ") $ fmap label1 $ list1Cells c

@@ -298,18 +298,30 @@ translatev dy = translate 0 dy
 ensuremath :: LaTeXC l => l -> l
 ensuremath = comm1 "ensuremath"
 
-mkLine a1 a2 p1 p2 = "\\draw " <> render p1 <> " to[out=" <> a1 <> ", in=" <> a2 <> "] " <> render p2 <> ";\n"
-mkLabel p anchor label = "\\node at " <> render p <> " [anchor=" <> anchor <> "] {"
-            <> render (ensuremath $ label1 label) <> "};\n"
-mkNode p label = "\\node at " <> render p <> " [rectangle, draw, fill=white] {"
-            <> render (ensuremath $ label2 label) <> "};\n"
+mkLine d a1 a2 p1 p2 =
+    "\\draw[" <> T.intercalate ", " (tikzOptions1 d) <> "] "
+    <> render p1
+    <> " to[out=" <> a1 <> ", in=" <> a2 <> "] "
+    <> render p2
+    <> ";\n"
+mkLabel p anchor label =
+    "\\node at " <> render p
+    <> " [anchor=" <> anchor <> "] {"
+    <> render (ensuremath $ label1 label)
+    <> "};\n"
+mkNode p d =
+    "\\node at " <> render p
+    <> " [" <> T.intercalate ", " (tikzOptions2 d) <> "] {"
+    <> render (ensuremath $ label2 d)
+    <> "};\n"
 
 
 draw2CellAtom :: RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
 draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
-    mconcat [ mkLine "0" "180" p1 p2
+    mconcat [ mkLine d "0" "180" p1 p2
         | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
         | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
+        | d <- list1Cells f
         ]
 draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
     let inputs = length1 f
@@ -326,12 +338,14 @@ draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
 
         drawnInputs = mconcat
             [ let angle = if y pnode == y p1 then "180" else if y pnode < y p1 then "90" else "-90"
-               in mkLine "0" angle p1 pnode
-            | p1 <- init $ tail $ scanl (flip translatev) pl bdyl ]
+               in mkLine d "0" angle p1 pnode
+            | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
+            | d <- list1Cells f ]
         drawnOutputs = mconcat
             [ let angle = if y pnode == y p2 then "0" else if y pnode < y p2 then "90" else "-90"
-               in mkLine angle "180" pnode p2
-            | p2 <- init $ tail $ scanl (flip translatev) pr bdyr ]
+               in mkLine d angle "180" pnode p2
+            | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
+            | d <- list1Cells g ]
     in drawnInputs <> drawnOutputs <> mkNode pnode label
 
 draw2CellSlice :: RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> Text
@@ -355,13 +369,15 @@ drawLO2C p0 opts c =
                 put pr
             )
     in output
-       <> drawBdyLabels (headInterleaved c) p0 "east"
-       <> drawBdyLabels (lastInterleaved c) pend "west"
+       <> drawBdyLabels (headInterleaved c) p0 True
+       <> drawBdyLabels (lastInterleaved c) pend False
     where
+        drawBdyLabels :: forall f. TwoCellBoundary f -> Point -> Bool -> Text
         drawBdyLabels (Bdy rep bdy) p0 dir =
-            T.unlines [ mkLabel p dir d
-                | d <- list1Cells rep
-                | p <- tail $ scanl (flip translatev) p0 bdy ]
+            T.unlines
+                [ mkLabel p (if dir then "east" else "west") d
+                    | d <- list1Cells rep
+                    | p <- tail $ scanl (flip translatev) p0 bdy ]
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
