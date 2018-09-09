@@ -109,6 +109,9 @@ list1Cells (Mk1 d _ _) = [d]
 list1Cells (Id1 _) = []
 list1Cells (Cmp1 f g) = list1Cells f ++ list1Cells g
 
+seal1Cell :: OneCellData -> Sing1 f -> Sing1 f
+seal1Cell s c = Mk1 s (src1 c) (tgt1 c)
+
 -- flip1Cell :: Sing1 (f :: a :-> b) -> Sing1 (g :: b :-> a)
 -- flip1Cell (Mk1 l a b) = Mk1 l b a
 -- flip1Cell (Cmp1 f g) = Cmp1 (flip1Cell f) (flip1Cell g)

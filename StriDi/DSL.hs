@@ -31,7 +31,10 @@ new1COptions :: LaTeX -> [[Text]] -> A1Cell
 new1COptions s o = mkA1 (OneCellData s (mconcat o)) monoidal0Cell monoidal0Cell
 
 new1C :: LaTeX -> A1Cell
-new1C s = new1COptions s []
+new1C s = new1COptions s [default1COptions]
+
+default1COptions :: [Text]
+default1COptions = []
 
 arrowR, arrowL :: [Text]
 arrowR = ["postaction={decorate}","decoration={markings, mark=at position 0.5 with {\\arrow{>}}}"]
@@ -53,6 +56,9 @@ default2COptions = ["rectangle", "draw", "fill=white"]
 
 class Sealable a where
     seal :: LaTeX -> a -> a
+
+instance Sealable A1Cell where
+    seal s (A1Cell c) = A1Cell $ seal1Cell (OneCellData s default1COptions) c
 
 instance Sealable A2Cell where
     seal s (A2Cell c) = A2Cell $ seal2Cell (TwoCellData s default2COptions) c
