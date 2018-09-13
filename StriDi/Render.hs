@@ -326,6 +326,9 @@ draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
 draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
     let inputs = length1 f
         outputs = length1 g
+-- \draw node at (2.5,3.0) [circle,draw,fill=white] (l) {\ensuremath{ll}}
+--             (l.west) ++(-1,-1) node[coordinate] (x1) {} to[out=right, in=down] (2.5,3.0);
+
 
         l2c = renderLength2Cell opts
         pnode = case () of
@@ -337,13 +340,13 @@ draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
                     translate (l2c / 2) (head bdyl + (sum $ init $ tail bdyl) / 2) pl
 
         drawnInputs = mconcat
-            [ let angle = if y pnode == y p1 then "180" else if y pnode < y p1 then "90" else "-90"
-               in mkLine d "0" angle p1 pnode
+            [ let angle = if y pnode == y p1 then "left" else if y pnode < y p1 then "up" else "down"
+               in mkLine d "right" angle p1 pnode
             | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
             | d <- list1Cells f ]
         drawnOutputs = mconcat
-            [ let angle = if y pnode == y p2 then "0" else if y pnode < y p2 then "90" else "-90"
-               in mkLine d angle "180" pnode p2
+            [ let angle = if y pnode == y p2 then "right" else if y pnode < y p2 then "up" else "down"
+               in mkLine d angle "left" pnode p2
             | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
             | d <- list1Cells g ]
     in drawnInputs <> drawnOutputs <> mkNode pnode label
@@ -359,18 +362,21 @@ draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) = let
         drawnQ = draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
     in drawnAtom <> drawnQ
 
-drawLO2C :: Point -> RenderOptions -> LayedOut2Cell f g -> Text
-drawLO2C p0 opts c =
-    let (pend, output) = (\x -> execRWS x () p0) $ sequence_
+drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
+drawLO2C opts c =
+    let p0 = Point 0 0
+        p1 = translateh (renderLength2Cell opts) p0
+        ((), output) = (\x -> execRWS x () ()) $ sequence_
             (iterInterleaved c $ \(bdyl, slice, bdyr) -> do
-                pl <- get
-                let pr = translateh (renderLength2Cell opts) pl
-                tell $ draw2CellSlice opts pl pr bdyl bdyr slice
-                put pr
+                tell $ draw2CellSlice opts p0 p1 bdyl bdyr slice
+                tell "&\n"
             )
-    in output
+    in "\\matrix{"
        <> drawBdyLabels (headInterleaved c) p0 True
-       <> drawBdyLabels (lastInterleaved c) pend False
+       <> "&\n"
+       <> output
+       <> drawBdyLabels (lastInterleaved c) p0 False
+       <> "\\\\};"
     where
         drawBdyLabels :: forall f. TwoCellBoundary f -> Point -> Bool -> Text
         drawBdyLabels (Bdy rep bdy) p0 dir =
@@ -381,7 +387,7 @@ drawLO2C p0 opts c =
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
-    . drawLO2C (Point 0 0) opts
+    . drawLO2C opts
     . layOutTwoCell (renderWidth2Cell opts)
     . twoCellToCanonForm
 
