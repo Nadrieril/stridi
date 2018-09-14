@@ -316,9 +316,9 @@ mkNode p d =
     <> "};\n"
 
 
-draw2CellAtom :: RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> Text
+draw2CellAtom :: MonadState Int m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> m Text
 draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
-    mconcat [ mkLine d "0" "180" p1 p2
+    return $ mconcat [ mkLine d "0" "180" p1 p2
         | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
         | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
         | d <- list1Cells f
@@ -349,29 +349,31 @@ draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
                in mkLine d angle "left" pnode p2
             | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
             | d <- list1Cells g ]
-    in drawnInputs <> drawnOutputs <> mkNode pnode label
+    in return $ drawnInputs <> drawnOutputs <> mkNode pnode label
 
-draw2CellSlice :: RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> Text
-draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) = ""
+draw2CellSlice :: MonadState Int m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> m Text
+draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) = return ""
 draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) = let
         (bdySrcAtom, bdySrcQ) = splitBoundaryR (srcAtom atom) (srcSlice q) bdyf
         (bdyTgtAtom, bdyTgtQ) = splitBoundaryR (tgtAtom atom) (tgtSlice q) bdyg
         addToHead x l = [x + head l] ++ tail l
         squashBdy (Bdy _ bdy0) (Bdy f bdy) = Bdy f $ addToHead (sum bdy0) bdy
-        drawnAtom = draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom
-        drawnQ = draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
-    in drawnAtom <> drawnQ
+    in do
+        drawnAtom <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom
+        drawnQ <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
+        return $ drawnAtom <> drawnQ
 
 drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
 drawLO2C opts c =
     let p0 = Point 0 0
         p1 = translateh (renderLength2Cell opts) p0
-        ((), output) = (\x -> execRWS x () ()) $ sequence_
+        (_, output) = (\x -> execRWS x () 0) $ sequence_
             (iterInterleaved c $ \(bdyl, slice, bdyr) -> do
-                tell $ draw2CellSlice opts p0 p1 bdyl bdyr slice
+                out <- draw2CellSlice opts p0 p1 bdyl bdyr slice
+                tell out
                 tell "&\n"
             )
-    in "\\matrix{"
+     in "\\matrix[column sep=1cm]{"
        <> drawBdyLabels (headInterleaved c) p0 True
        <> "&\n"
        <> output
