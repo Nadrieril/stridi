@@ -1,0 +1,5 @@
+color 0-cells
+per-2cell config of dimensions
+display typechecker error in nicely rendered LaTeX
+make typechecker errors actually useful/readable
+tests for the rendering pipeline ?

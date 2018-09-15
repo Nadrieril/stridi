@@ -55,6 +55,13 @@ mapInterleaved :: (forall a b. f a b -> f' a b) -> Interleaved f g a b -> Interl
 mapInterleaved f (NilIntl ga) = NilIntl ga
 mapInterleaved f (CmpIntl ga fab q) = CmpIntl ga (f fab) $ mapInterleaved f q
 
+mapAccumInterleaved :: (forall a b. acc a -> f a b -> (acc b, f' a b)) -> (forall a. acc a -> g a -> g' a) -> acc a -> Interleaved f g a b -> (acc b, Interleaved f' g' a b)
+mapAccumInterleaved mapf mapg acc (NilIntl ga) = (acc, NilIntl $ mapg acc ga)
+mapAccumInterleaved mapf mapg acc (CmpIntl ga fab q) =
+    let ga' = mapg acc ga
+        (acc', fab') = mapf acc fab
+     in CmpIntl ga' fab' <$> mapAccumInterleaved mapf mapg acc' q
+
 flatMapInterleaved :: (forall a b. f a b -> g a -> g b -> Interleaved f' g a b) -> Interleaved f g a b -> Interleaved f' g a b
 flatMapInterleaved f (NilIntl ga) = NilIntl ga
 flatMapInterleaved f (CmpIntl ga fab q) = mergeInterleaved (f fab ga (headInterleaved q)) $ flatMapInterleaved f q
