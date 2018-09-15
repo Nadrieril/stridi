@@ -329,7 +329,12 @@ mkNode p d name =
     <> name
     <> " {" <> render (ensuremath $ label2 d) <> "};\n"
 
-type MonadDraw2Cell m = (MonadWriter Text m, MonadState Int m)
+type MonadDraw2Cell m = (MonadWriter (Text, Text) m, MonadState Int m)
+
+drawInMatrix :: MonadDraw2Cell m => Text -> m ()
+drawInMatrix t = tell (t, "")
+drawOutMatrix :: MonadDraw2Cell m => Text -> m ()
+drawOutMatrix t = tell ("", t)
 
 newName :: MonadDraw2Cell m => m Text
 newName = do
@@ -351,94 +356,95 @@ instance Render NamedNode where
 namePoint :: (MonadDraw2Cell m, Render s) => OneCellData -> s -> m NamedNode
 namePoint d p = do
     name <- newName
-    tell $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
+    drawInMatrix $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
     return $ NamedNode name d
 
-draw2CellAtom :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> m ([NamedNode], [NamedNode])
-draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
-    (\x -> (x,x)) <$> sequence
-        [ namePoint d $ midPoint p1 p2
-        | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
-        | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
-        | d <- list1Cells f
-        ]
-draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) = do
-    let inputs = length1 f
-        outputs = length1 g
+pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, OneCellData)]
+pointsFromBdy (Bdy f bdy) p0 =
+    [ (p, d)
+    | d <- list1Cells f
+    | p <- init $ tail $ scanl (flip translatev) p0 bdy ]
 
-        deltaFromBorder = Point (renderLength2Cell opts / 2) 0
+draw2CellAtom :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> [NamedNode] -> m [NamedNode]
+draw2CellAtom opts pl pr _ _ (IdAtom _) inputNodes = return inputNodes
+draw2CellAtom opts pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom label f g) inputNodes = do
+    let deltaFromBorder = Point (renderLength2Cell opts / 2) 0
+        inputs = length1 f
+        outputs = length1 g
         pnode = case () of
             _ | inputs == 0 && outputs == 0 ->
-                    translatev ((sum bdyl) / 2) pl
+                    translatev ((sum unbdyl) / 2) pl
             _ | inputs == 0 ->
-                    translatev (head bdyr + (sum $ init $ tail bdyr) / 2) pr
+                    translatev (head unbdyr + (sum $ init $ tail unbdyr) / 2) pr
             _  ->
-                    translatev (head bdyl + (sum $ init $ tail bdyl) / 2) pl
+                    translatev (head unbdyl + (sum $ init $ tail unbdyl) / 2) pl
 
     name <- newName
     -- Draw the node once to enable referring to its anchors
-    tell $ mkNode pnode label ("(" <> name <> ")")
-    pointsLeft <- sequence
-        [ do
-            pname <- namePoint d $ "(" <> name <> ".west) ++" <> render dp
-            let angle = if y dp == 0 then "180" else if y dp > 0 then "up" else "down"
-            tell $ mkLine False d "0" angle pname pnode
-            return pname
-        | dp <- init $ tail $ scanl (flip translatev) (pl - pnode - deltaFromBorder) bdyl
-        | d <- list1Cells f ]
-    pointsRight <- sequence
-        [ do
-            pname <- namePoint d $ "(" <> name <> ".east) ++" <> render dp
-            let angle = if y dp == 0 then "0" else if y dp > 0 then "up" else "down"
-            tell $ mkLine False d angle "180" pnode pname
-            return pname
-        | dp <- init $ tail $ scanl (flip translatev) (pr - pnode + deltaFromBorder) bdyr
-        | d <- list1Cells g ]
-    -- draw the node again to hide overlapping lines
-    tell $ mkNode pnode label ""
-    return (pointsLeft, pointsRight)
+    drawInMatrix $ mkNode pnode label ("(" <> name <> ")")
 
-draw2CellSlice :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> m ([NamedNode], [NamedNode])
-draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) = return ([], [])
-draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) = let
+    -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boudaries
+    pointsLeft <- forM (pointsFromBdy bdyl (pl - pnode - deltaFromBorder)) $ \(dp, d) -> do
+        pname <- namePoint d $ "(" <> name <> ".west) ++" <> render dp
+        let angle = if y dp == 0 then "180" else if y dp > 0 then "up" else "down"
+        drawInMatrix $ mkLine False d "0" angle pname pnode
+        return pname
+    pointsRight <- forM (pointsFromBdy bdyr (pr - pnode + deltaFromBorder)) $ \(dp, d) -> do
+        pname <- namePoint d $ "(" <> name <> ".east) ++" <> render dp
+        let angle = if y dp == 0 then "0" else if y dp > 0 then "up" else "down"
+        drawInMatrix $ mkLine False d angle "180" pnode pname
+        return pname
+
+    -- Draw the node again to hide overlapping lines
+    drawInMatrix $ mkNode pnode label ""
+
+    -- Link with previously drawn cells
+    forM_ (zip inputNodes pointsLeft) $ \(pl, pr) ->
+        drawOutMatrix $ mkLine True (node1CData pl) "0" "180" pl pr
+
+    return pointsRight
+
+draw2CellSlice :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [NamedNode] -> m [NamedNode]
+draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) _ = return []
+draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
         (bdySrcAtom, bdySrcQ) = splitBoundaryR (srcAtom atom) (srcSlice q) bdyf
         (bdyTgtAtom, bdyTgtQ) = splitBoundaryR (tgtAtom atom) (tgtSlice q) bdyg
-        addToHead x l = [x + head l] ++ tail l
-        squashBdy (Bdy _ bdy0) (Bdy f bdy) = Bdy f $ addToHead (sum bdy0) bdy
+        (inputNodesAtom, inputNodesQ) = splitAt (length1 $ srcAtom atom) inputNodes
     in do
-        (pointsLeftAtom, pointsRightAtom) <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom
-        (pointsLeftSlice, pointsRightSlice) <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
-        return (pointsLeftAtom ++ pointsLeftSlice, pointsRightAtom ++ pointsRightSlice)
+        outputNodesAtom <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom inputNodesAtom
+        outputNodesSlice <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q inputNodesQ
+        return $ outputNodesAtom ++ outputNodesSlice
 
 drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
-drawLO2C opts c = snd $ (\x -> evalRWS x () 0) $ do
+drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x () 0) $ do
     let p0 = Point 0 0
-    tell $ "\\matrix[column sep=3mm]{"
-    ptsLeft <- drawBdyLabels (headInterleaved c) p0 True
-    tell $ "&\n"
-    pts2Cell <- sequence
-        (iterInterleaved c $ \(bdyl, slice, bdyr) -> do
-            (pointsLeft, pointsRight) <- draw2CellSlice opts p0 p0 bdyl bdyr slice
-            tell "&\n"
-            return (pointsLeft, pointsRight)
+    let deltaFromBorder = Point (renderLength2Cell opts / 2) 0
+
+    drawInMatrix $ "\\matrix[column sep=3mm]{"
+
+    pointsLeft <- forM (pointsFromBdy (headInterleaved c) p0) $ \(p, d) -> do
+        let p' = p - deltaFromBorder
+        drawInMatrix $ mkLabel p' "east" d
+        drawInMatrix $ mkLine False d "0" "180" p' p
+        namePoint d p
+    drawInMatrix $ "&\n"
+
+    pts2Cell <- foldM (\nodes f -> f nodes) pointsLeft
+        (iterInterleaved c $ \(bdyl, slice, bdyr) -> \nodes ->
+            draw2CellSlice opts p0 p0 bdyl bdyr slice nodes
+            <* drawInMatrix "&\n"
         )
-    ptsRight <- drawBdyLabels (lastInterleaved c) p0 False
-    tell $ "\\\\};"
 
-    let allPts = [ptsLeft] ++ concatMap (\(x, y) -> [x, y]) pts2Cell ++ [ptsRight]
-    forM_ (chunksOf 2 allPts) $ \[ptsLeft, ptsRight] -> do
-        forM_ (zip ptsLeft ptsRight) $ \(pl, pr) ->
-            tell $ mkLine True (node1CData pl) "0" "180" pl pr
-    return ()
+    pointsRight <- forM (pointsFromBdy (lastInterleaved c) p0) $ \(p, d) -> do
+        let p' = p + deltaFromBorder
+        drawInMatrix $ mkLabel p' "west" d
+        drawInMatrix $ mkLine False d "0" "180" p p'
+        namePoint d p
 
-    where
-        drawBdyLabels :: forall f m. MonadDraw2Cell m => TwoCellBoundary f -> Point -> Bool -> m [NamedNode]
-        drawBdyLabels (Bdy rep bdy) p0 dir =
-            sequence [ do
-                    tell $ mkLabel p (if dir then "east" else "west") d
-                    namePoint d p
-                | d <- list1Cells rep
-                | p <- tail $ scanl (flip translatev) p0 bdy ]
+    drawInMatrix $ "\\\\};"
+
+    forM_ (zip pts2Cell pointsRight) $ \(pl, pr) ->
+        drawOutMatrix $ mkLine True (node1CData pl) "0" "180" pl pr
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
