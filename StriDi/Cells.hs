@@ -22,7 +22,8 @@ data ZeroCellData = ZeroCellData {
 
 data OneCellData = OneCellData {
     label1 :: LaTeX,
-    tikzOptions1 :: [Text]
+    tikzOptions1 :: [Text],
+    tikzDecorations1 :: [Text]
 } deriving (Eq, Show)
 
 data TwoCellData = TwoCellData {

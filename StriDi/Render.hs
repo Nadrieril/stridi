@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
-    RecordWildCards, AllowAmbiguousTypes, ViewPatterns, TypeFamilies, TypeFamilyDependencies #-}
+    RecordWildCards, AllowAmbiguousTypes, ViewPatterns, TypeFamilies, TypeFamilyDependencies,
+    ConstraintKinds #-}
+{-# OPTIONS_GHC -Wno-missing-methods #-}
+
 module StriDi.Render
     ( draw2Cell
     , drawA2Cell
@@ -13,6 +16,7 @@ import Data.Kind (type Type)
 import Data.Type.Equality
 import Data.Proxy
 import Data.List
+import Data.List.Extra
 import Control.Arrow ((***))
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
@@ -272,8 +276,8 @@ data RenderOptions = RenderOptions {
     renderLength2Cell :: Rational
 }
 
-defaultRenderOpts = RenderOptions 1 1.5
-largeRenderOpts = RenderOptions 2 5
+defaultRenderOpts = RenderOptions 1 1
+largeRenderOpts = RenderOptions 1.6 1
 
 data Point = Point Rational Rational
 instance Show Point where
@@ -294,12 +298,22 @@ translateh dx = translate dx 0
 translatev :: Rational -> Point -> Point
 translatev dy = translate 0 dy
 
+instance Num Point where
+    (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
+    (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
+
+scalePoint :: Rational -> Point -> Point
+scalePoint k (Point x y) = Point (k*x) (k*y)
+
+midPoint :: Point -> Point -> Point
+midPoint p1 p2 = scalePoint (1/2) $ p1 + p2
+
 
 ensuremath :: LaTeXC l => l -> l
 ensuremath = comm1 "ensuremath"
 
-mkLine d a1 a2 p1 p2 =
-    "\\draw[" <> T.intercalate ", " (tikzOptions1 d) <> "] "
+mkLine decorate d a1 a2 p1 p2 =
+    "\\draw[" <> T.intercalate ", " (tikzOptions1 d ++ if decorate then tikzDecorations1 d else []) <> "] "
     <> render p1
     <> " to[out=" <> a1 <> ", in=" <> a2 <> "] "
     <> render p2
@@ -309,83 +323,122 @@ mkLabel p anchor label =
     <> " [anchor=" <> anchor <> "] {"
     <> render (ensuremath $ label1 label)
     <> "};\n"
-mkNode p d =
+mkNode p d name =
     "\\node at " <> render p
-    <> " [" <> T.intercalate ", " (tikzOptions2 d) <> "] {"
-    <> render (ensuremath $ label2 d)
-    <> "};\n"
+    <> " [" <> T.intercalate ", " (tikzOptions2 d) <> "] "
+    <> name
+    <> " {" <> render (ensuremath $ label2 d) <> "};\n"
 
+type MonadDraw2Cell m = (MonadWriter Text m, MonadState Int m)
 
-draw2CellAtom :: MonadState Int m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> m Text
+newName :: MonadDraw2Cell m => m Text
+newName = do
+    (i :: Int) <- get
+    modify (+1)
+    return $ "n" <> T.pack (show i)
+
+data NamedNode = NamedNode {
+    nodeName :: Text,
+    node1CData :: OneCellData
+}
+
+instance Show NamedNode where
+    show = T.unpack . render
+
+instance Render NamedNode where
+    render n = "(" <> nodeName n <> ")"
+
+namePoint :: (MonadDraw2Cell m, Render s) => OneCellData -> s -> m NamedNode
+namePoint d p = do
+    name <- newName
+    tell $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
+    return $ NamedNode name d
+
+draw2CellAtom :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> m ([NamedNode], [NamedNode])
 draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (IdAtom f) =
-    return $ mconcat [ mkLine d "0" "180" p1 p2
+    (\x -> (x,x)) <$> sequence
+        [ namePoint d $ midPoint p1 p2
         | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
         | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
         | d <- list1Cells f
         ]
-draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) =
+draw2CellAtom opts pl pr (unBdy -> bdyl) (unBdy -> bdyr) (MkAtom label f g) = do
     let inputs = length1 f
         outputs = length1 g
--- \draw node at (2.5,3.0) [circle,draw,fill=white] (l) {\ensuremath{ll}}
---             (l.west) ++(-1,-1) node[coordinate] (x1) {} to[out=right, in=down] (2.5,3.0);
 
-
-        l2c = renderLength2Cell opts
+        deltaFromBorder = Point (renderLength2Cell opts / 2) 0
         pnode = case () of
             _ | inputs == 0 && outputs == 0 ->
-                    translate (l2c / 2) ((sum bdyl) / 2) pl
+                    translatev ((sum bdyl) / 2) pl
             _ | inputs == 0 ->
-                    translate (-l2c / 2) (head bdyr + (sum $ init $ tail bdyr) / 2) pr
+                    translatev (head bdyr + (sum $ init $ tail bdyr) / 2) pr
             _  ->
-                    translate (l2c / 2) (head bdyl + (sum $ init $ tail bdyl) / 2) pl
+                    translatev (head bdyl + (sum $ init $ tail bdyl) / 2) pl
 
-        drawnInputs = mconcat
-            [ let angle = if y pnode == y p1 then "left" else if y pnode < y p1 then "up" else "down"
-               in mkLine d "right" angle p1 pnode
-            | p1 <- init $ tail $ scanl (flip translatev) pl bdyl
-            | d <- list1Cells f ]
-        drawnOutputs = mconcat
-            [ let angle = if y pnode == y p2 then "right" else if y pnode < y p2 then "up" else "down"
-               in mkLine d angle "left" pnode p2
-            | p2 <- init $ tail $ scanl (flip translatev) pr bdyr
-            | d <- list1Cells g ]
-    in return $ drawnInputs <> drawnOutputs <> mkNode pnode label
+    name <- newName
+    -- Draw the node once to enable referring to its anchors
+    tell $ mkNode pnode label ("(" <> name <> ")")
+    pointsLeft <- sequence
+        [ do
+            pname <- namePoint d $ "(" <> name <> ".west) ++" <> render dp
+            let angle = if y dp == 0 then "180" else if y dp > 0 then "up" else "down"
+            tell $ mkLine False d "0" angle pname pnode
+            return pname
+        | dp <- init $ tail $ scanl (flip translatev) (pl - pnode - deltaFromBorder) bdyl
+        | d <- list1Cells f ]
+    pointsRight <- sequence
+        [ do
+            pname <- namePoint d $ "(" <> name <> ".east) ++" <> render dp
+            let angle = if y dp == 0 then "0" else if y dp > 0 then "up" else "down"
+            tell $ mkLine False d angle "180" pnode pname
+            return pname
+        | dp <- init $ tail $ scanl (flip translatev) (pr - pnode + deltaFromBorder) bdyr
+        | d <- list1Cells g ]
+    -- draw the node again to hide overlapping lines
+    tell $ mkNode pnode label ""
+    return (pointsLeft, pointsRight)
 
-draw2CellSlice :: MonadState Int m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> m Text
-draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) = return ""
+draw2CellSlice :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> m ([NamedNode], [NamedNode])
+draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) = return ([], [])
 draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) = let
         (bdySrcAtom, bdySrcQ) = splitBoundaryR (srcAtom atom) (srcSlice q) bdyf
         (bdyTgtAtom, bdyTgtQ) = splitBoundaryR (tgtAtom atom) (tgtSlice q) bdyg
         addToHead x l = [x + head l] ++ tail l
         squashBdy (Bdy _ bdy0) (Bdy f bdy) = Bdy f $ addToHead (sum bdy0) bdy
     in do
-        drawnAtom <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom
-        drawnQ <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
-        return $ drawnAtom <> drawnQ
+        (pointsLeftAtom, pointsRightAtom) <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom
+        (pointsLeftSlice, pointsRightSlice) <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q
+        return (pointsLeftAtom ++ pointsLeftSlice, pointsRightAtom ++ pointsRightSlice)
 
 drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
-drawLO2C opts c =
+drawLO2C opts c = snd $ (\x -> evalRWS x () 0) $ do
     let p0 = Point 0 0
-        p1 = translateh (renderLength2Cell opts) p0
-        (_, output) = (\x -> execRWS x () 0) $ sequence_
-            (iterInterleaved c $ \(bdyl, slice, bdyr) -> do
-                out <- draw2CellSlice opts p0 p1 bdyl bdyr slice
-                tell out
-                tell "&\n"
-            )
-     in "\\matrix[column sep=1cm]{"
-       <> drawBdyLabels (headInterleaved c) p0 True
-       <> "&\n"
-       <> output
-       <> drawBdyLabels (lastInterleaved c) p0 False
-       <> "\\\\};"
+    tell $ "\\matrix[column sep=3mm]{"
+    ptsLeft <- drawBdyLabels (headInterleaved c) p0 True
+    tell $ "&\n"
+    pts2Cell <- sequence
+        (iterInterleaved c $ \(bdyl, slice, bdyr) -> do
+            (pointsLeft, pointsRight) <- draw2CellSlice opts p0 p0 bdyl bdyr slice
+            tell "&\n"
+            return (pointsLeft, pointsRight)
+        )
+    ptsRight <- drawBdyLabels (lastInterleaved c) p0 False
+    tell $ "\\\\};"
+
+    let allPts = [ptsLeft] ++ concatMap (\(x, y) -> [x, y]) pts2Cell ++ [ptsRight]
+    forM_ (chunksOf 2 allPts) $ \[ptsLeft, ptsRight] -> do
+        forM_ (zip ptsLeft ptsRight) $ \(pl, pr) ->
+            tell $ mkLine True (node1CData pl) "0" "180" pl pr
+    return ()
+
     where
-        drawBdyLabels :: forall f. TwoCellBoundary f -> Point -> Bool -> Text
+        drawBdyLabels :: forall f m. MonadDraw2Cell m => TwoCellBoundary f -> Point -> Bool -> m [NamedNode]
         drawBdyLabels (Bdy rep bdy) p0 dir =
-            T.unlines
-                [ mkLabel p (if dir then "east" else "west") d
-                    | d <- list1Cells rep
-                    | p <- tail $ scanl (flip translatev) p0 bdy ]
+            sequence [ do
+                    tell $ mkLabel p (if dir then "east" else "west") d
+                    namePoint d p
+                | d <- list1Cells rep
+                | p <- tail $ scanl (flip translatev) p0 bdy ]
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
