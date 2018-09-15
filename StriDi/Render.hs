@@ -104,6 +104,24 @@ twoCellToCanonForm (Tensor2 c1 c2) = twoCellToCanonForm c1 `tensorCanonForm` two
 
 
 
+data RenderOptions = RenderOptions {
+    renderWidth2Cell :: Rational,
+    renderLength2Cell :: Rational
+}
+
+defaultRenderOpts = RenderOptions 1 1
+largeRenderOpts = RenderOptions 2 1
+
+type MonadLayout2Cell = MonadReader RenderOptions
+
+askBaseWidth :: MonadReader RenderOptions m => m Rational
+askBaseWidth = renderWidth2Cell <$> ask
+
+askBaseLength :: MonadReader RenderOptions m => m Rational
+askBaseLength = renderLength2Cell <$> ask
+
+
+
 data TwoCellBoundary f = Bdy {
     repBdy :: Sing1 f,
     unBdy :: [Rational]
@@ -114,11 +132,12 @@ instance Show (TwoCellBoundary f) where
         "TwoCellBoundary (" ++ show1CellLabel f ++ ") "
         ++ "[" ++ intercalate ", " (show . approx <$> bdy) ++ "]"
 
-defaultBoundary :: Rational -> Sing1 f -> TwoCellBoundary f
-defaultBoundary baseWidth f = Bdy f $
-        if length1 f == 0
-            then [0]
-            else [0] ++ replicate (length1 f - 1) baseWidth ++ [0]
+defaultBoundary :: MonadLayout2Cell m => Sing1 f -> m (TwoCellBoundary f)
+defaultBoundary f = do
+    baseWidth <- askBaseWidth
+    return $ Bdy f $ if length1 f == 0
+        then [0]
+        else [0] ++ replicate (length1 f - 1) baseWidth ++ [0]
 
 splitBoundary :: Sing1 f -> Sing1 g -> TwoCellBoundary (f `Cmp1` g) -> (TwoCellBoundary f, TwoCellBoundary g)
 splitBoundary f g (Bdy _ l) = let
@@ -128,9 +147,6 @@ splitBoundary f g (Bdy _ l) = let
         after = drop (n + 1) l
     in ( Bdy f (before ++ [mid/2])
        , Bdy g ([mid/2] ++ after))
-
-mergeBoundary :: Rational -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellBoundary (f `Cmp1` g)
-mergeBoundary baseWidth (Bdy f lf) (Bdy g lg) = Bdy (f `cmp1` g) (init lf ++ [last lf + head lg] ++ tail lg)
 
 
 
@@ -194,26 +210,27 @@ propagateDeltasSlice (EmptySlice _) = id
 propagateDeltasSlice (ConsSlice atom q) = mapDeltas (srcAtom atom) (srcSlice q) (propagateDeltasAtom atom) (propagateDeltasSlice q)
 
 
-mergeBD :: Rational -> (TwoCellBoundary f, TwoCellBdyDelta h) -> (TwoCellBoundary g, TwoCellBdyDelta i) -> (TwoCellBoundary (f `Cmp1` g), TwoCellBdyDelta (h `Cmp1` i))
-mergeBD baseWidth ((Bdy f lf), deltash) ((Bdy g lg), deltasi) =
+mergeBD :: MonadLayout2Cell m => (TwoCellBoundary f, TwoCellBdyDelta h) -> (TwoCellBoundary g, TwoCellBdyDelta i) -> m (TwoCellBoundary (f `Cmp1` g), TwoCellBdyDelta (h `Cmp1` i))
+mergeBD ((Bdy f lf), deltash) ((Bdy g lg), deltasi) = do
+    baseWidth <- askBaseWidth
     let midb = last lf + head lg
         deltaMerge = BdyDelta (repDelta deltasi) $
             if midb >= baseWidth then [] else [(0, baseWidth - midb)]
-     in ( Bdy (f `cmp1` g) (init lf ++ [baseWidth `max` midb] ++ tail lg)
-        , deltash `tensorDeltas` (deltasi `mergeDeltas` deltaMerge))
+    return ( Bdy (f `cmp1` g) (init lf ++ [baseWidth `max` midb] ++ tail lg)
+           , deltash `tensorDeltas` (deltasi `mergeDeltas` deltaMerge))
 
-backpropBdyAtom :: Rational -> TwoCellAtom f g -> TwoCellBoundary g -> (TwoCellBoundary f, TwoCellBdyDelta g)
-backpropBdyAtom baseWidth (IdAtom f) bdy = (bdy, nilDelta f)
-backpropBdyAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
-        inputs = length1 f
+backpropBdyAtom :: MonadLayout2Cell m => TwoCellAtom f g -> TwoCellBoundary g -> m (TwoCellBoundary f, TwoCellBdyDelta g)
+backpropBdyAtom (IdAtom f) bdy = return (bdy, nilDelta f)
+backpropBdyAtom (MkAtom _ f g) (unBdy -> bdy) = do
+    newbdy <- defaultBoundary f
+    let inputs = length1 f
         outputs = length1 g
-        newbdy = defaultBoundary baseWidth f
         outputWidth = sum bdy
         inputWidth = sum $ unBdy newbdy
         deltaWidth = outputWidth - inputWidth
         (x1, x2) = (head bdy, last bdy)
 
-     in if deltaWidth > 0
+    return $ if deltaWidth > 0
             -- If there is already enough space to fit the cell, spread the leftover space evenly,
             -- so that the cell remains centered wrt its outputs.
            then let srcDelta = BdyDelta f [(0, deltaWidth/2 + x1 - (x1 + x2) / 2), (inputs, deltaWidth/2 + x2 - (x1 + x2) / 2)]
@@ -222,13 +239,13 @@ backpropBdyAtom baseWidth (MkAtom _ f g) (unBdy -> bdy) = let
            else let tgtDelta = BdyDelta g [(0, abs deltaWidth/2), (outputs, abs deltaWidth/2)]
                 in (newbdy, tgtDelta)
 
-backpropBdySlice :: Rational -> TwoCellSlice f g -> TwoCellBoundary g -> (TwoCellBoundary f, TwoCellBdyDelta g)
-backpropBdySlice baseWidth (EmptySlice a) bdy = (bdy, nilDelta $ Id1 a)
-backpropBdySlice baseWidth s@(ConsSlice atom q) bdy =
+backpropBdySlice :: MonadLayout2Cell m => TwoCellSlice f g -> TwoCellBoundary g -> m (TwoCellBoundary f, TwoCellBdyDelta g)
+backpropBdySlice (EmptySlice a) bdy = return (bdy, nilDelta $ Id1 a)
+backpropBdySlice s@(ConsSlice atom q) bdy = do
     let (bdyAtom, bdyQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdy
-     in mergeBD baseWidth
-            (backpropBdyAtom baseWidth atom bdyAtom)
-            (backpropBdySlice baseWidth q bdyQ)
+    bdAtom <- backpropBdyAtom atom bdyAtom
+    bdQ <- backpropBdySlice q bdyQ
+    mergeBD bdAtom bdQ
 
 
 
@@ -242,12 +259,12 @@ accumulateDeltasSD deltas sd = propagateDeltasSlice (sliceSD sd) deltas `mergeDe
 
 type PartiallyLayedOut2Cell = Interleaved TwoCellSliceAndDelta TwoCellBoundary
 
-partiallyLayOutTwoCell :: Rational -> TwoCellCanonForm f g -> PartiallyLayedOut2Cell f g
-partiallyLayOutTwoCell baseWidth (NilIntl g) = NilIntl $ defaultBoundary baseWidth g
-partiallyLayOutTwoCell baseWidth (CmpIntl _ s q) =
-    let newq = partiallyLayOutTwoCell baseWidth q
-        (newbdy, deltas) = backpropBdySlice baseWidth s (headInterleaved newq)
-     in CmpIntl newbdy (SliceAndDelta s deltas) newq
+partiallyLayOutTwoCell :: MonadLayout2Cell m => TwoCellCanonForm f g -> m (PartiallyLayedOut2Cell f g)
+partiallyLayOutTwoCell (NilIntl g) = NilIntl <$> defaultBoundary g
+partiallyLayOutTwoCell (CmpIntl _ s q) = do
+    newq <- partiallyLayOutTwoCell q
+    (newbdy, deltas) <- backpropBdySlice s (headInterleaved newq)
+    return $ CmpIntl newbdy (SliceAndDelta s deltas) newq
 
 type LayedOut2Cell = Interleaved TwoCellSlice TwoCellBoundary
 
@@ -256,30 +273,27 @@ propagateDeltasLO2C c = let
         firstDeltas = nilDelta $ repBdy $ headInterleaved c
      in snd $ mapAccumInterleaved (\deltas sd -> (accumulateDeltasSD deltas sd, sliceSD sd)) applyDeltas firstDeltas c
 
-layOutTwoCell :: forall f g. Rational -> TwoCellCanonForm f g -> LayedOut2Cell f g
-layOutTwoCell baseWidth = propagateDeltasLO2C . partiallyLayOutTwoCell baseWidth
+layOutTwoCell :: MonadLayout2Cell m => TwoCellCanonForm f g -> m (LayedOut2Cell f g)
+layOutTwoCell c = propagateDeltasLO2C <$> partiallyLayOutTwoCell c
 
 
-
-data RenderOptions = RenderOptions {
-    renderWidth2Cell :: Rational,
-    renderLength2Cell :: Rational
-}
-
-defaultRenderOpts = RenderOptions 1 1
-largeRenderOpts = RenderOptions 2 1
 
 data Point = Point Rational Rational
+
 instance Show Point where
     show (Point x y) = "(" ++ show (approx x) ++ "," ++ show (approx y) ++ ")"
 instance Render Point where
     render = T.pack . show
 
+instance Num Point where
+    (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
+    (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
+
 y :: Point -> Rational
 y (Point _ y) = y
 
 translate :: Rational -> Rational -> Point -> Point
-translate dx dy (Point x y) = Point (x+dx) (y+dy)
+translate dx dy = (Point dx dy +)
 
 translateh :: Rational -> Point -> Point
 translateh dx = translate dx 0
@@ -287,16 +301,15 @@ translateh dx = translate dx 0
 translatev :: Rational -> Point -> Point
 translatev dy = translate 0 dy
 
-instance Num Point where
-    (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
-    (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
-
 scalePoint :: Rational -> Point -> Point
 scalePoint k (Point x y) = Point (k*x) (k*y)
 
 midPoint :: Point -> Point -> Point
 midPoint p1 p2 = scalePoint (1/2) $ p1 + p2
 
+
+
+type MonadDraw2Cell m = (MonadReader RenderOptions m, MonadWriter (Text, Text) m, MonadState Int m)
 
 ensuremath :: LaTeXC l => l -> l
 ensuremath = comm1 "ensuremath"
@@ -307,18 +320,16 @@ mkLine decorate d a1 a2 p1 p2 =
     <> " to[out=" <> a1 <> ", in=" <> a2 <> "] "
     <> render p2
     <> ";\n"
-mkLabel p anchor label =
+mkLabel p anchor d =
     "\\node at " <> render p
     <> " [anchor=" <> anchor <> "] {"
-    <> render (ensuremath $ label1 label)
+    <> render (ensuremath $ label1 d)
     <> "};\n"
 mkNode p d name =
     "\\node at " <> render p
     <> " [" <> T.intercalate ", " (tikzOptions2 d) <> "] "
     <> name
     <> " {" <> render (ensuremath $ label2 d) <> "};\n"
-
-type MonadDraw2Cell m = (MonadWriter (Text, Text) m, MonadState Int m)
 
 drawInMatrix :: MonadDraw2Cell m => Text -> m ()
 drawInMatrix t = tell (t, "")
@@ -331,6 +342,7 @@ newName = do
     modify (+1)
     return $ "n" <> T.pack (show i)
 
+-- A named tikz node along with onecell data, used for drawing wires
 data NamedNode = NamedNode {
     nodeName :: Text,
     node1CData :: OneCellData
@@ -354,38 +366,43 @@ pointsFromBdy (Bdy f bdy) p0 =
     | d <- list1Cells f
     | p <- init $ tail $ scanl (flip translatev) p0 bdy ]
 
-draw2CellAtom :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> [NamedNode] -> m [NamedNode]
-draw2CellAtom opts pl pr _ _ (IdAtom _) inputNodes = return inputNodes
-draw2CellAtom opts pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom label f g) inputNodes = do
-    let deltaFromBorder = Point (renderLength2Cell opts / 2) 0
+draw2CellAtom :: MonadDraw2Cell m => Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> [NamedNode] -> m [NamedNode]
+draw2CellAtom pl pr _ _ (IdAtom _) inputNodes = return inputNodes
+draw2CellAtom pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom celldata f g) inputNodes = do
+    baseLength <- askBaseLength
+    let deltaFromBorder = Point (baseLength / 2) 0
         inputs = length1 f
         outputs = length1 g
         pnode = case () of
             _ | inputs == 0 && outputs == 0 ->
-                    translatev ((sum unbdyl) / 2) pl
+                translatev ((head unbdyl) / 2) pl
             _ | inputs == 0 ->
-                    translatev (head unbdyr + (sum $ init $ tail unbdyr) / 2) pr
+                midPoint
+                    (translatev (head unbdyr) pr)
+                    (translatev (sum $ init unbdyr) pr)
             _  ->
-                    translatev (head unbdyl + (sum $ init $ tail unbdyl) / 2) pl
+                midPoint
+                    (translatev (head unbdyl) pl)
+                    (translatev (sum $ init unbdyl) pl)
 
-    name <- newName
+    nodeName <- newName
     -- Draw the node once to enable referring to its anchors
-    drawInMatrix $ mkNode pnode label ("(" <> name <> ")")
+    drawInMatrix $ mkNode pnode celldata ("(" <> nodeName <> ")")
 
     -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boudaries
     pointsLeft <- forM (pointsFromBdy bdyl (pl - pnode - deltaFromBorder)) $ \(dp, d) -> do
-        pname <- namePoint d $ "(" <> name <> ".west) ++" <> render dp
-        let angle = if abs (y dp) <= 0.1 then "180" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d "0" angle pname pnode
-        return pname
+        ptName <- namePoint d $ "(" <> nodeName <> ".west) ++" <> render dp
+        let angle = if abs (y dp) <= 0.01 then "180" else if y dp > 0 then "up" else "down"
+        drawInMatrix $ mkLine False d "0" angle ptName pnode
+        return ptName
     pointsRight <- forM (pointsFromBdy bdyr (pr - pnode + deltaFromBorder)) $ \(dp, d) -> do
-        pname <- namePoint d $ "(" <> name <> ".east) ++" <> render dp
-        let angle = if abs (y dp) <= 0.1 then "0" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d angle "180" pnode pname
-        return pname
+        ptName <- namePoint d $ "(" <> nodeName <> ".east) ++" <> render dp
+        let angle = if abs (y dp) <= 0.01 then "0" else if y dp > 0 then "up" else "down"
+        drawInMatrix $ mkLine False d angle "180" pnode ptName
+        return ptName
 
     -- Draw the node again to hide overlapping lines
-    drawInMatrix $ mkNode pnode label ""
+    drawInMatrix $ mkNode pnode celldata ""
 
     -- Link with previously drawn cells
     forM_ (zip inputNodes pointsLeft) $ \(pl, pr) ->
@@ -393,26 +410,22 @@ draw2CellAtom opts pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom label f
 
     return pointsRight
 
-draw2CellSlice :: MonadDraw2Cell m => RenderOptions -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [NamedNode] -> m [NamedNode]
-draw2CellSlice opts pl pr bdyf bdyg (EmptySlice _) _ = do
-    -- let deltaFromBorder = Point (renderLength2Cell opts / 2) 0
-    -- let pl' = translatev (head (unBdy bdyf)) pl - deltaFromBorder
-    -- let pr' = translatev (head (unBdy bdyg)) pr + deltaFromBorder
-    -- drawInMatrix $ mkLine False (OneCellData "" ["blue"] []) "0" "180" pl' pr'
-    return []
-draw2CellSlice opts pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
+draw2CellSlice :: MonadDraw2Cell m => Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [NamedNode] -> m [NamedNode]
+draw2CellSlice pl pr bdyf bdyg (EmptySlice _) _ = return []
+draw2CellSlice pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
         (bdySrcAtom, bdySrcQ) = splitBoundary (srcAtom atom) (srcSlice q) bdyf
         (bdyTgtAtom, bdyTgtQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdyg
         (inputNodesAtom, inputNodesQ) = splitAt (length1 $ srcAtom atom) inputNodes
     in do
-        outputNodesAtom <- draw2CellAtom opts pl pr bdySrcAtom bdyTgtAtom atom inputNodesAtom
-        outputNodesSlice <- draw2CellSlice opts (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q inputNodesQ
+        outputNodesAtom <- draw2CellAtom pl pr bdySrcAtom bdyTgtAtom atom inputNodesAtom
+        outputNodesSlice <- draw2CellSlice (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q inputNodesQ
         return $ outputNodesAtom ++ outputNodesSlice
 
 drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
-drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x () 0) $ do
+drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x opts 0) $ do
+    baseLength <- askBaseLength
     let p0 = Point 0 0
-    let deltaFromBorder = Point (renderLength2Cell opts / 2) 0
+    let deltaFromBorder = Point (baseLength / 2) 0
 
     drawInMatrix $ "\\matrix[column sep=3mm]{"
 
@@ -425,7 +438,7 @@ drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x () 0) $
 
     pts2Cell <- foldM (\nodes f -> f nodes) pointsLeft
         (iterInterleaved c $ \(bdyl, slice, bdyr) -> \nodes ->
-            draw2CellSlice opts p0 p0 bdyl bdyr slice nodes
+            draw2CellSlice p0 p0 bdyl bdyr slice nodes
             <* drawInMatrix "&\n"
         )
 
@@ -443,7 +456,7 @@ drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x () 0) $
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
     . drawLO2C opts
-    . layOutTwoCell (renderWidth2Cell opts)
+    . flip layOutTwoCell opts
     . twoCellToCanonForm
 
 drawA2Cell :: LaTeXC l => RenderOptions -> A2Cell -> l
