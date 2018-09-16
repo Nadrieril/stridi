@@ -8,6 +8,8 @@ import Control.Monad.Identity
 import Text.LaTeX
 import StriDi.Cells
 
+infixr 6 **
+infixl 7 *
 
 class Composable a where
     (*) :: a -> a -> a
