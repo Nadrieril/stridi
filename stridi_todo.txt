@@ -3,3 +3,7 @@ per-2cell config of dimensions
 display typechecker error in nicely rendered LaTeX
 make typechecker errors actually useful/readable
 tests for the rendering pipeline ?
+create an external DSL to avoid having to compile Haskell over and over
+add eDSLs for 2-cat, monoidal and PROPs
+add pretty-printing of cell formula and cell type
+publish on GitHub
