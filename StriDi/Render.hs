@@ -40,30 +40,30 @@ approx x = realToFrac (round (100 * realToFrac x)) / 100
 
 
 data TwoCellAtom (f :: a :-> b) (g :: a :-> b) where
-    IdAtom :: Sing1 f -> TwoCellAtom f f
-    MkAtom :: TwoCellData -> Sing1 f -> Sing1 g -> TwoCellAtom f g
+    IdAtom :: V1Cell f -> TwoCellAtom f f
+    MkAtom :: D2Cell -> V1Cell f -> V1Cell g -> TwoCellAtom f g
 
-srcAtom :: TwoCellAtom f g -> Sing1 f
+srcAtom :: TwoCellAtom f g -> V1Cell f
 srcAtom (IdAtom f) = f
 srcAtom (MkAtom _ f _) = f
 
-tgtAtom :: TwoCellAtom f g -> Sing1 g
+tgtAtom :: TwoCellAtom f g -> V1Cell g
 tgtAtom (IdAtom f) = f
 tgtAtom (MkAtom _ _ g) = g
 
 
 
 data TwoCellSlice (f :: a :-> b) (g :: a :-> b) where
-    EmptySlice :: Sing0 a -> TwoCellSlice (TId1 :: a :-> a) (TId1 :: a :-> a)
+    EmptySlice :: V0Cell a -> TwoCellSlice (K1Id :: a :-> a) (K1Id :: a :-> a)
     ConsSlice :: TwoCellAtom (f :: a :-> b) (g :: a :-> b)
-            -> TwoCellSlice h i -> TwoCellSlice (f `Cmp1` h) (g `Cmp1` i)
+            -> TwoCellSlice h i -> TwoCellSlice (f `K1Cmp` h) (g `K1Cmp` i)
 
-srcSlice :: TwoCellSlice f g -> Sing1 f
-srcSlice (EmptySlice a) = Id1 a
+srcSlice :: TwoCellSlice f g -> V1Cell f
+srcSlice (EmptySlice a) = V1Id a
 srcSlice (ConsSlice atom q) = srcAtom atom `cmp1` srcSlice q
 
-tgtSlice :: TwoCellSlice f g -> Sing1 g
-tgtSlice (EmptySlice a) = Id1 a
+tgtSlice :: TwoCellSlice f g -> V1Cell g
+tgtSlice (EmptySlice a) = V1Id a
 tgtSlice (ConsSlice atom q) = tgtAtom atom `cmp1` tgtSlice q
 
 singSlice :: TwoCellAtom f g -> TwoCellSlice f g
@@ -72,10 +72,10 @@ singSlice atom =
       Refl -> case unit1Proof (tgtAtom atom) of
         Refl -> ConsSlice atom (EmptySlice $ tgt1 $ srcAtom atom)
 
-idSlice :: Sing1 f -> TwoCellSlice f f
+idSlice :: V1Cell f -> TwoCellSlice f f
 idSlice f = singSlice (IdAtom f)
 
-tensorSlice :: TwoCellSlice f g -> TwoCellSlice h i -> TwoCellSlice (f `Cmp1` h) (g `Cmp1` i)
+tensorSlice :: TwoCellSlice f g -> TwoCellSlice h i -> TwoCellSlice (f `K1Cmp` h) (g `K1Cmp` i)
 tensorSlice (EmptySlice _) s = s
 tensorSlice (ConsSlice atom q) s2 =
     case assoc1Proof (srcAtom atom) (srcSlice q) (srcSlice s2) of
@@ -84,9 +84,9 @@ tensorSlice (ConsSlice atom q) s2 =
 
 
 
-type TwoCellCanonForm = Interleaved TwoCellSlice Sing1
+type TwoCellCanonForm = Interleaved TwoCellSlice V1Cell
 
-tensorCanonForm :: TwoCellCanonForm f g -> TwoCellCanonForm h i -> TwoCellCanonForm (f `Cmp1` h) (g `Cmp1` i)
+tensorCanonForm :: TwoCellCanonForm f g -> TwoCellCanonForm h i -> TwoCellCanonForm (f `K1Cmp` h) (g `K1Cmp` i)
 tensorCanonForm (NilIntl f) (NilIntl h) =
     NilIntl (f `cmp1` h)
 tensorCanonForm (NilIntl f) (CmpIntl h s q) =
@@ -97,10 +97,10 @@ tensorCanonForm (CmpIntl f s1 q1) (CmpIntl h s2 q2) =
     CmpIntl (f `cmp1` h) (tensorSlice s1 s2) (tensorCanonForm q1 q2)
 
 twoCellToCanonForm :: f :--> g -> TwoCellCanonForm f g
-twoCellToCanonForm (Id2 f) = CmpIntl f (idSlice f) $ NilIntl f
-twoCellToCanonForm (Mk2 d f g) = CmpIntl f (singSlice $ MkAtom d f g) $ NilIntl g
-twoCellToCanonForm (Cmp2 c1 c2) = twoCellToCanonForm c1 `mergeInterleaved` twoCellToCanonForm c2
-twoCellToCanonForm (Tensor2 c1 c2) = twoCellToCanonForm c1 `tensorCanonForm` twoCellToCanonForm c2
+twoCellToCanonForm (V2Id f) = CmpIntl f (idSlice f) $ NilIntl f
+twoCellToCanonForm (V2Atom d f g) = CmpIntl f (singSlice $ MkAtom d f g) $ NilIntl g
+twoCellToCanonForm (V2Cmp c1 c2) = twoCellToCanonForm c1 `mergeInterleaved` twoCellToCanonForm c2
+twoCellToCanonForm (V2Tensor c1 c2) = twoCellToCanonForm c1 `tensorCanonForm` twoCellToCanonForm c2
 
 
 
@@ -123,7 +123,7 @@ askBaseLength = renderLength2Cell <$> ask
 
 
 data TwoCellBoundary f = Bdy {
-    repBdy :: Sing1 f,
+    repBdy :: V1Cell f,
     unBdy :: [Rational]
 }
 
@@ -132,14 +132,14 @@ instance Show (TwoCellBoundary f) where
         "TwoCellBoundary (" ++ show1CellLabel f ++ ") "
         ++ "[" ++ intercalate ", " (show . approx <$> bdy) ++ "]"
 
-defaultBoundary :: MonadLayout2Cell m => Sing1 f -> m (TwoCellBoundary f)
+defaultBoundary :: MonadLayout2Cell m => V1Cell f -> m (TwoCellBoundary f)
 defaultBoundary f = do
     baseWidth <- askBaseWidth
     return $ Bdy f $ if length1 f == 0
         then [0]
         else [0] ++ replicate (length1 f - 1) baseWidth ++ [0]
 
-splitBoundary :: Sing1 f -> Sing1 g -> TwoCellBoundary (f `Cmp1` g) -> (TwoCellBoundary f, TwoCellBoundary g)
+splitBoundary :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, TwoCellBoundary g)
 splitBoundary f g (Bdy _ l) = let
         n = length1 f
         before = take n l
@@ -151,7 +151,7 @@ splitBoundary f g (Bdy _ l) = let
 
 
 data TwoCellBdyDelta f = BdyDelta {
-    repDelta :: Sing1 f,
+    repDelta :: V1Cell f,
     unDelta :: [(Int, Rational)]
 }
 type BdyDelta f = (Int, Rational)
@@ -161,26 +161,26 @@ instance Show (TwoCellBdyDelta f) where
         "TwoCellBdyDelta (" ++ show1CellLabel f ++ ") "
         ++ "[" ++ intercalate ", " (show . (fmap approx) <$> delta) ++ "]"
 
-nilDelta :: Sing1 f -> TwoCellBdyDelta f
+nilDelta :: V1Cell f -> TwoCellBdyDelta f
 nilDelta f = BdyDelta f []
 
 mergeDeltas :: TwoCellBdyDelta f -> TwoCellBdyDelta f -> TwoCellBdyDelta f
 mergeDeltas (BdyDelta f d1) (BdyDelta _ d2) = BdyDelta f $ d1 ++ d2
 
-tensorDeltas :: TwoCellBdyDelta f -> TwoCellBdyDelta g -> TwoCellBdyDelta (f `Cmp1` g)
+tensorDeltas :: TwoCellBdyDelta f -> TwoCellBdyDelta g -> TwoCellBdyDelta (f `K1Cmp` g)
 tensorDeltas (BdyDelta f deltasf) (BdyDelta g deltasg) =
     BdyDelta (f `cmp1` g) $ deltasf ++ fmap (\(i, d) -> (i + length1 f, d)) deltasg
 
-splitDeltas :: Sing1 f -> Sing1 g -> TwoCellBdyDelta (f `Cmp1` g) -> (TwoCellBdyDelta f, TwoCellBdyDelta g)
+splitDeltas :: V1Cell f -> V1Cell g -> TwoCellBdyDelta (f `K1Cmp` g) -> (TwoCellBdyDelta f, TwoCellBdyDelta g)
 splitDeltas f g (unDelta -> deltas) = let
         nf = length1 f
         (deltasf, deltasg) = partition (\(i, _) -> i <= nf) deltas
     in (BdyDelta f deltasf, BdyDelta g $ fmap (\(i, d) -> (i - nf, d)) deltasg)
 
-mapDeltas :: Sing1 f -> Sing1 g
+mapDeltas :: V1Cell f -> V1Cell g
             -> (TwoCellBdyDelta f -> TwoCellBdyDelta f')
             -> (TwoCellBdyDelta g -> TwoCellBdyDelta g')
-            -> TwoCellBdyDelta (f `Cmp1` g) -> TwoCellBdyDelta (f' `Cmp1` g')
+            -> TwoCellBdyDelta (f `K1Cmp` g) -> TwoCellBdyDelta (f' `K1Cmp` g')
 mapDeltas f1 g1 mapf mapg = uncurry tensorDeltas . (mapf *** mapg) . splitDeltas f1 g1
 
 applyDeltas :: forall f. TwoCellBdyDelta f -> TwoCellBoundary f -> TwoCellBoundary f
@@ -210,7 +210,7 @@ propagateDeltasSlice (EmptySlice _) = id
 propagateDeltasSlice (ConsSlice atom q) = mapDeltas (srcAtom atom) (srcSlice q) (propagateDeltasAtom atom) (propagateDeltasSlice q)
 
 
-mergeBD :: MonadLayout2Cell m => (TwoCellBoundary f, TwoCellBdyDelta h) -> (TwoCellBoundary g, TwoCellBdyDelta i) -> m (TwoCellBoundary (f `Cmp1` g), TwoCellBdyDelta (h `Cmp1` i))
+mergeBD :: MonadLayout2Cell m => (TwoCellBoundary f, TwoCellBdyDelta h) -> (TwoCellBoundary g, TwoCellBdyDelta i) -> m (TwoCellBoundary (f `K1Cmp` g), TwoCellBdyDelta (h `K1Cmp` i))
 mergeBD ((Bdy f lf), deltash) ((Bdy g lg), deltasi) = do
     baseWidth <- askBaseWidth
     let midb = last lf + head lg
@@ -240,7 +240,7 @@ backpropBdyAtom (MkAtom _ f g) (unBdy -> bdy) = do
                 in (newbdy, tgtDelta)
 
 backpropBdySlice :: MonadLayout2Cell m => TwoCellSlice f g -> TwoCellBoundary g -> m (TwoCellBoundary f, TwoCellBdyDelta g)
-backpropBdySlice (EmptySlice a) bdy = return (bdy, nilDelta $ Id1 a)
+backpropBdySlice (EmptySlice a) bdy = return (bdy, nilDelta $ V1Id a)
 backpropBdySlice s@(ConsSlice atom q) bdy = do
     let (bdyAtom, bdyQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdy
     bdAtom <- backpropBdyAtom atom bdyAtom
@@ -345,7 +345,7 @@ newName = do
 -- A named tikz node along with onecell data, used for drawing wires
 data NamedNode = NamedNode {
     nodeName :: Text,
-    node1CData :: OneCellData
+    node1CData :: D1Cell
 }
 
 instance Show NamedNode where
@@ -354,13 +354,13 @@ instance Show NamedNode where
 instance Render NamedNode where
     render n = "(" <> nodeName n <> ")"
 
-namePoint :: (MonadDraw2Cell m, Render s) => OneCellData -> s -> m NamedNode
+namePoint :: (MonadDraw2Cell m, Render s) => D1Cell -> s -> m NamedNode
 namePoint d p = do
     name <- newName
     drawInMatrix $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
     return $ NamedNode name d
 
-pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, OneCellData)]
+pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, D1Cell)]
 pointsFromBdy (Bdy f bdy) p0 =
     [ (p, d)
     | d <- list1Cells f

@@ -24,13 +24,13 @@ instance Composable A2Cell where
     (**) = flip tensorA2
 
 monoidal0Cell :: A0Cell
-monoidal0Cell = mkA0 $ ZeroCellData "*"
+monoidal0Cell = mkA0 $ D0Cell "*"
 
 id1 :: A1Cell
 id1 = idA1 monoidal0Cell
 
 new1COptions :: LaTeX -> [Text] -> [Text] -> A1Cell
-new1COptions s o d = mkA1 (OneCellData s o d) monoidal0Cell monoidal0Cell
+new1COptions s o d = mkA1 (D1Cell s o d) monoidal0Cell monoidal0Cell
 
 new1C :: LaTeX -> A1Cell
 new1C s = new1COptions s default1COptions []
@@ -43,7 +43,7 @@ id2 :: A1Cell -> A2Cell
 id2 = idA2
 
 new2COptions :: LaTeX -> [Text] -> A1Cell -> A1Cell -> A2Cell
-new2COptions s o f g = mkA2 (TwoCellData s o) f g
+new2COptions s o f g = mkA2 (D2Cell s o) f g
 
 new2C :: LaTeX -> A1Cell -> A1Cell -> A2Cell
 new2C s f g = new2COptions s default2COptions f g
@@ -56,8 +56,8 @@ class Sealable a where
     seal :: LaTeX -> a -> a
 
 instance Sealable A1Cell where
-    seal s (A1Cell c) = A1Cell $ seal1Cell (OneCellData s default1COptions []) c
+    seal s (A1Cell c) = A1Cell $ seal1Cell (D1Cell s default1COptions []) c
 
 instance Sealable A2Cell where
-    seal s (A2Cell c) = A2Cell $ seal2Cell (TwoCellData s default2COptions) c
+    seal s (A2Cell c) = A2Cell $ seal2Cell (D2Cell s default2COptions) c
 
