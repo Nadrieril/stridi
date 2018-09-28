@@ -11,7 +11,8 @@ import qualified Text.LaTeX as L
 import qualified Text.LaTeX.Packages.AMSMath as L
 import StriDi.Cells
 import StriDi.Render
-import StriDi.DSL hiding (arrowL, arrowR)
+import StriDi.DSL
+import StriDi.DSL.Monoidal
 
 main :: IO ()
 main = execLaTeXT body >>= T.putStrLn . render
