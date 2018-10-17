@@ -1,0 +1,34 @@
+name:                stridi
+version:             0.1.0.0
+homepage:            https://github.com/Nadrieril/stridi#readme
+license:             MIT
+license-file:        LICENSE
+author:              Nadrieril
+maintainer:          nadrieril@gmail.com
+copyright:           2018 Nadrieril
+-- category:            Web
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+      StriDi.DSL
+    , StriDi.DSL.Monoidal
+    , StriDi.DSL.PROP
+    , StriDi.Cells
+    , StriDi.Render
+    , StriDi.TypedSeq
+  build-depends:
+      base >= 4.7 && < 5
+    , text
+    , mtl
+    , HaTeX
+    , singletons
+    , extra
+  default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/Nadrieril/stridi
