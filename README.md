@@ -15,6 +15,5 @@ Todo:
 - tests for the rendering pipeline ?
 - create an external DSL to avoid having to compile Haskell over and over
 - add pretty-printing of cell formula and cell type
-- publish on GitHub
 
 Contributions and ideas are more than welcome !
