@@ -1,1 +1,20 @@
-# stridi
+`stridi` is a Haskell library and DSL to render string diagrams in LaTeX using TikZ.
+
+- `StriDi.Cells` provides statically typed datastructures to represent 2-cells in an arbitrary bicategory;
+- `StriDi.Render` provides function to render a 2-cell into TikZ code;
+- `StriDi.DSL` provides submodules with DSLs to help defining such 2-cells. So far there is a DSL for monoidal categories and one for PROPs.
+
+Apologies for the drastic lack of documentation; look at `test.hs` for an example usage of the library.
+
+Todo:
+- color 0-cells to support bicategories fully
+- DSL for bicategories
+- per-2cell config of dimensions
+- make typechecker errors actually useful/readable
+- display typechecker error in nicely rendered LaTeX
+- tests for the rendering pipeline ?
+- create an external DSL to avoid having to compile Haskell over and over
+- add pretty-printing of cell formula and cell type
+- publish on GitHub
+
+Contributions and ideas are more than welcome !
