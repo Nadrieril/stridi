@@ -139,15 +139,25 @@ defaultBoundary f = do
         then [0]
         else [0] ++ replicate (length1 f - 1) baseWidth ++ [0]
 
-splitBoundary :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, TwoCellBoundary g)
+splitBoundary' :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Rational, TwoCellBoundary g)
+splitBoundary' f g (Bdy _ l) = let
+        n = length1 f
+        before = take n l
+        mid = l !! n
+        after = drop (n + 1) l
+    in ( Bdy f (before ++ [0])
+       , mid
+       , Bdy g ([0] ++ after))
+
+splitBoundary :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Rational, TwoCellBoundary g)
 splitBoundary f g (Bdy _ l) = let
         n = length1 f
         before = take n l
         mid = l !! n
         after = drop (n + 1) l
     in ( Bdy f (before ++ [mid/2])
+       , 0
        , Bdy g ([mid/2] ++ after))
-
 
 
 data TwoCellBdyDelta f = BdyDelta {
@@ -210,13 +220,18 @@ propagateDeltasSlice (EmptySlice _) = id
 propagateDeltasSlice (ConsSlice atom q) = mapDeltas (srcAtom atom) (srcSlice q) (propagateDeltasAtom atom) (propagateDeltasSlice q)
 
 
-mergeBD :: MonadLayout2Cell m => (TwoCellBoundary f, TwoCellBdyDelta h) -> (TwoCellBoundary g, TwoCellBdyDelta i) -> m (TwoCellBoundary (f `K1Cmp` g), TwoCellBdyDelta (h `K1Cmp` i))
-mergeBD ((Bdy f lf), deltash) ((Bdy g lg), deltasi) = do
+mergeBD :: MonadLayout2Cell m =>
+    (TwoCellBoundary f, TwoCellBdyDelta h) ->
+    Rational ->
+    (TwoCellBoundary g, TwoCellBdyDelta i) ->
+    m (TwoCellBoundary (f `K1Cmp` g), TwoCellBdyDelta (h `K1Cmp` i))
+mergeBD ((Bdy f lf), deltash) origmid ((Bdy g lg), deltasi) = do
     baseWidth <- askBaseWidth
     let midb = last lf + head lg
+        origmid = baseWidth
         deltaMerge = BdyDelta (repDelta deltasi) $
-            if midb >= baseWidth then [] else [(0, baseWidth - midb)]
-    return ( Bdy (f `cmp1` g) (init lf ++ [baseWidth `max` midb] ++ tail lg)
+            if midb >= origmid then [] else [(0, origmid - midb)]
+    return ( Bdy (f `cmp1` g) (init lf ++ [midb `max` origmid] ++ tail lg)
            , deltash `tensorDeltas` (deltasi `mergeDeltas` deltaMerge))
 
 backpropBdyAtom :: MonadLayout2Cell m => TwoCellAtom f g -> TwoCellBoundary g -> m (TwoCellBoundary f, TwoCellBdyDelta g)
@@ -242,10 +257,10 @@ backpropBdyAtom (MkAtom _ f g) (unBdy -> bdy) = do
 backpropBdySlice :: MonadLayout2Cell m => TwoCellSlice f g -> TwoCellBoundary g -> m (TwoCellBoundary f, TwoCellBdyDelta g)
 backpropBdySlice (EmptySlice a) bdy = return (bdy, nilDelta $ V1Id a)
 backpropBdySlice s@(ConsSlice atom q) bdy = do
-    let (bdyAtom, bdyQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdy
+    let (bdyAtom, mid, bdyQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdy
     bdAtom <- backpropBdyAtom atom bdyAtom
     bdQ <- backpropBdySlice q bdyQ
-    mergeBD bdAtom bdQ
+    mergeBD bdAtom mid bdQ
 
 
 
@@ -413,12 +428,15 @@ draw2CellAtom pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom celldata f g
 draw2CellSlice :: MonadDraw2Cell m => Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [NamedNode] -> m [NamedNode]
 draw2CellSlice pl pr bdyf bdyg (EmptySlice _) _ = return []
 draw2CellSlice pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
-        (bdySrcAtom, bdySrcQ) = splitBoundary (srcAtom atom) (srcSlice q) bdyf
-        (bdyTgtAtom, bdyTgtQ) = splitBoundary (tgtAtom atom) (tgtSlice q) bdyg
+        (bdySrcAtom, midSrc, bdySrcQ) = splitBoundary' (srcAtom atom) (srcSlice q) bdyf
+        (bdyTgtAtom, midTgt, bdyTgtQ) = splitBoundary' (tgtAtom atom) (tgtSlice q) bdyg
         (inputNodesAtom, inputNodesQ) = splitAt (length1 $ srcAtom atom) inputNodes
     in do
         outputNodesAtom <- draw2CellAtom pl pr bdySrcAtom bdyTgtAtom atom inputNodesAtom
-        outputNodesSlice <- draw2CellSlice (translatev (sum $ unBdy bdySrcAtom) pl) (translatev (sum $ unBdy bdyTgtAtom) pr) (bdySrcQ) (bdyTgtQ) q inputNodesQ
+        outputNodesSlice <- draw2CellSlice
+                (translatev (sum $ midSrc : unBdy bdySrcAtom) pl)
+                (translatev (sum $ midTgt : unBdy bdyTgtAtom) pr)
+                bdySrcQ bdyTgtQ q inputNodesQ
         return $ outputNodesAtom ++ outputNodesSlice
 
 drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text

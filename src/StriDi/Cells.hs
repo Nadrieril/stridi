@@ -4,7 +4,7 @@ module StriDi.Cells where
 
 import GHC.TypeLits
 import Data.Type.Equality
-import Data.Promotion.Prelude.List
+import Data.Singletons.Prelude.List
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.List

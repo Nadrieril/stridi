@@ -13,11 +13,13 @@ main = shakeArgs opts $ do
     want ["test.pdf"]
 
     "*.pdf" %> \outputFile -> do
+        alwaysRerun
         let texFile = buildDir </> outputFile -<.> "tex"
         need [texFile]
         cmd_ "latexrun -O" [buildDir] "--latex-cmd=xelatex" [texFile]
 
     buildDir </> "*.tex" %> \outputFile -> do
+        alwaysRerun
         let inputFile = takeFileName outputFile -<.> "hs"
         -- TODO: dep on stridi hs files
         need [inputFile]
@@ -25,6 +27,7 @@ main = shakeArgs opts $ do
         writeFileChanged outputFile stdout
 
     phony "clean" $ do
+        alwaysRerun
         putNormal $ "Cleaning files in " ++ buildDir
         cmd_ "latexrun -O" buildDir "--clean-all"
         removeFilesAfter buildDir ["//*"]

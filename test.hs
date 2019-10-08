@@ -51,6 +51,7 @@ cap (ar, al) = new2COptions "" [] (ar ** al) id1
 l = new2C "l" (sr**sl) (ar**al)
 fork = new2COptions "" dot a (a**a)
 cofork = new2COptions "" dot (a**a) a
+bead = new2COptions "" dot a a
 
 body :: LaTeXT IO ()
 body = do
@@ -59,6 +60,7 @@ body = do
     raw "\\usepackage{amsmath}"
     raw "\\usetikzlibrary{decorations.markings, arrows, matrix}"
     raw "\\begin{document}"
+
     -- lens laws
     draw2c $ l * (id2 ar ** cup aa ** id2 al)
     draw2c $ (id2 sr ** cup ss ** id2 sl) * (l ** l)
@@ -81,4 +83,10 @@ body = do
     draw2c $ (cofork ** id2 a) * (id2 a ** fork)
     draw2c $ (id2 a ** id2 a ** fork) * (cofork ** id2 a ** id2 a)
     draw2c $ (id2 a ** fork) * (cofork ** id2 a)
+    raw "\\\\"
+    draw2c $ bead * bead
+    draw2c $ bead ** bead
+    draw2c $ (bead ** bead) * (bead ** bead)
+    draw2c $ bead ** bead ** bead
+
     raw "\\end{document}"

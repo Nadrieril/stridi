@@ -7,13 +7,16 @@
 Apologies for the drastic lack of documentation; look at `test.hs` for an example usage of the library.
 
 Todo:
+- include sample output in README
+- fix some rendering quirks
+- define invariants for the rendering process
+- tests for the rendering pipeline ?
+- make typechecker errors actually useful/readable
+- display typechecker error in nicely rendered LaTeX ?
 - color 0-cells to support bicategories fully
 - DSL for bicategories
 - per-2cell config of dimensions
-- make typechecker errors actually useful/readable
-- display typechecker error in nicely rendered LaTeX
-- tests for the rendering pipeline ?
-- create an external DSL to avoid having to compile Haskell over and over
+- create an external (text) DSL to avoid having to compile Haskell over and over
 - add pretty-printing of cell formula and cell type
 
 Contributions and ideas are more than welcome !

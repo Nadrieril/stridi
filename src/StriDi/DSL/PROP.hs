@@ -5,10 +5,10 @@ import Prelude hiding ((**), (*))
 import Data.Text
 import Control.Monad.RWS.Strict
 import Control.Monad.Identity
-import Text.LaTeX
+import Text.LaTeX hiding (dot)
 import StriDi.Cells
 import StriDi.DSL
-import StriDi.DSL.Monoidal
+import StriDi.DSL.Monoidal hiding (new2C, new1COptions, new2COptions)
 
 generating1Cell :: A1Cell
 generating1Cell = new1C ""
