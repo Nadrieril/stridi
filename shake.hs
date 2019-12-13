@@ -1,5 +1,5 @@
 #!/usr/bin/env stack
--- stack --resolver lts-12.7 script --package shake
+-- stack --resolver lts-14.7 script --package shake
 import Development.Shake
 import Development.Shake.FilePath
 

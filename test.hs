@@ -3,7 +3,7 @@
 import Prelude hiding ((*), (**))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Text.LaTeX
+import Text.LaTeX hiding (cup, cap, dot)
 import Text.LaTeX.Base.Syntax
 import Text.LaTeX.Base.Class
 import Text.LaTeX.Packages.AMSMath hiding (cup, cap, dot)
