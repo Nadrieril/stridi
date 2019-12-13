@@ -84,6 +84,11 @@ body = do
     draw2c $ (id2 a ** id2 a ** fork) * (cofork ** id2 a ** id2 a)
     draw2c $ (id2 a ** fork) * (cofork ** id2 a)
     raw "\\\\"
+    draw2c $ cofork ** cofork
+    draw2c $ cofork ** id2 a ** cofork
+    draw2c $ id2 a ** cofork
+    draw2c $ cofork ** id2 a
+    raw "\\\\"
     draw2c $ bead * bead
     draw2c $ bead ** bead
     draw2c $ (bead ** bead) * (bead ** bead)
