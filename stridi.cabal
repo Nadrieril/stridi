@@ -18,6 +18,7 @@ library
     , StriDi.DSL.Monoidal
     , StriDi.DSL.PROP
     , StriDi.Cells
+    , StriDi.Layout
     , StriDi.Render
     , StriDi.TypedSeq
   build-depends:
