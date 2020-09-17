@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns, TypeFamilies, TypeFamilyDependencies,
-    ConstraintKinds #-}
+    ConstraintKinds, NamedFieldPuns #-}
 {-# OPTIONS_GHC -Wno-missing-methods #-}
 
 module StriDi.Render
@@ -381,14 +381,19 @@ pointsFromBdy (Bdy f bdy) p0 =
     | d <- list1Cells f
     | p <- init $ tail $ scanl (flip translatev) p0 bdy ]
 
-draw2CellAtom :: MonadDraw2Cell m => Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> [NamedNode] -> m [NamedNode]
-draw2CellAtom pl pr _ _ (IdAtom _) inputNodes = return inputNodes
-draw2CellAtom pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom celldata f g) inputNodes = do
-    baseLength <- askBaseLength
+data LayedOutAtom f g = LayedOutAtom {
+    atom :: TwoCellAtom f g,
+    location :: Point,
+    leftBdy :: [(Point, D1Cell)],
+    rightBdy :: [(Point, D1Cell)]
+}
+
+layOutAtom :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> LayedOutAtom f g
+layOutAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
     let deltaFromBorder = Point (baseLength / 2) 0
         inputs = length1 f
         outputs = length1 g
-        pnode = case () of
+        location = case () of
             _ | inputs == 0 && outputs == 0 ->
                 translatev ((head unbdyl) / 2) pl
             _ | inputs == 0 ->
@@ -399,25 +404,31 @@ draw2CellAtom pl pr bdyl@(Bdy _ unbdyl) bdyr@(Bdy _ unbdyr) (MkAtom celldata f g
                 midPoint
                     (translatev (head unbdyl) pl)
                     (translatev (sum $ init unbdyl) pl)
+        leftBdy = pointsFromBdy bdyl (pl - location - deltaFromBorder)
+        rightBdy = pointsFromBdy bdyr (pr - location + deltaFromBorder)
+     in LayedOutAtom { atom, location, leftBdy, rightBdy }
 
+draw2CellAtom :: MonadDraw2Cell m => LayedOutAtom f g -> [NamedNode] -> m [NamedNode]
+draw2CellAtom (LayedOutAtom { atom = IdAtom _ }) inputNodes = return inputNodes
+draw2CellAtom (LayedOutAtom { atom = MkAtom celldata _ _, location, leftBdy, rightBdy }) inputNodes = do
     nodeName <- newName
     -- Draw the node once to enable referring to its anchors
-    drawInMatrix $ mkNode pnode celldata ("(" <> nodeName <> ")")
+    drawInMatrix $ mkNode location celldata ("(" <> nodeName <> ")")
 
     -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boudaries
-    pointsLeft <- forM (pointsFromBdy bdyl (pl - pnode - deltaFromBorder)) $ \(dp, d) -> do
+    pointsLeft <- forM leftBdy $ \(dp, d) -> do
         ptName <- namePoint d $ "(" <> nodeName <> ".west) ++" <> render dp
         let angle = if abs (y dp) <= 0.01 then "180" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d "0" angle ptName pnode
+        drawInMatrix $ mkLine False d "0" angle ptName location
         return ptName
-    pointsRight <- forM (pointsFromBdy bdyr (pr - pnode + deltaFromBorder)) $ \(dp, d) -> do
+    pointsRight <- forM rightBdy $ \(dp, d) -> do
         ptName <- namePoint d $ "(" <> nodeName <> ".east) ++" <> render dp
         let angle = if abs (y dp) <= 0.01 then "0" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d angle "180" pnode ptName
+        drawInMatrix $ mkLine False d angle "180" location ptName
         return ptName
 
     -- Draw the node again to hide overlapping lines
-    drawInMatrix $ mkNode pnode celldata ""
+    drawInMatrix $ mkNode location celldata ""
 
     -- Link with previously drawn cells
     forM_ (zip inputNodes pointsLeft) $ \(pl, pr) ->
@@ -432,7 +443,9 @@ draw2CellSlice pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
         (bdyTgtAtom, midTgt, bdyTgtQ) = splitBoundary' (tgtAtom atom) (tgtSlice q) bdyg
         (inputNodesAtom, inputNodesQ) = splitAt (length1 $ srcAtom atom) inputNodes
     in do
-        outputNodesAtom <- draw2CellAtom pl pr bdySrcAtom bdyTgtAtom atom inputNodesAtom
+        baseLength <- askBaseLength
+        let layedOutAtom = layOutAtom baseLength pl pr bdySrcAtom bdyTgtAtom atom
+        outputNodesAtom <- draw2CellAtom layedOutAtom inputNodesAtom
         outputNodesSlice <- draw2CellSlice
                 (translatev (sum $ midSrc : unBdy bdySrcAtom) pl)
                 (translatev (sum $ midTgt : unBdy bdyTgtAtom) pr)
