@@ -31,6 +31,15 @@ library
     , diagrams
   default-language:    Haskell2010
 
+test-suite test
+  type: exitcode-stdio-1.0
+  main-is: test.hs
+  build-depends:
+      base >= 4.7 && < 5
+    , text
+    , HaTeX
+    , stridi
+
 source-repository head
   type:     git
   location: https://github.com/Nadrieril/stridi

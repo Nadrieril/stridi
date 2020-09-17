@@ -20,6 +20,8 @@ in
       hie = "unstable";
     };
 
-    buildInputs = with pkgs.haskellPackages;
-      [ ghcid ];
+    buildInputs = with pkgs.haskellPackages; [
+      pkgs.texlive.combined.scheme-medium
+      ghcid
+    ];
   }

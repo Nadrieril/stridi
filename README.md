@@ -12,7 +12,9 @@ nix-build project.stridi.components.library
 ```
 But then I'm not sure how to use the output without nix x)
 
-To hack on it, just run `nix-shell`, and build with `cabal build`. This project uses haskell.nix.
+To hack on it, just run `nix-shell`, and build with `stack build`. This project uses haskell.nix.
+
+To build the tests, run `stack test` and build the output with `pdflatex` or similar.
 
 Todo:
 - include sample output in README

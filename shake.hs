@@ -14,20 +14,24 @@ main = shakeArgs opts $ do
 
     "*.pdf" %> \outputFile -> do
         alwaysRerun
-        let texFile = buildDir </> outputFile -<.> "tex"
+        let inputFile = buildDir </> outputFile
+        copyFileChanged inputFile outputFile
+
+    buildDir </> "*.pdf" %> \outputFile -> do
+        alwaysRerun
+        let texFile = outputFile -<.> "tex"
         need [texFile]
-        cmd_ "latexrun -O" [buildDir] "--latex-cmd=xelatex" [texFile]
+        cmd_ "pdflatex -interaction nonstopmode -output-directory" [buildDir] [texFile]
 
     buildDir </> "*.tex" %> \outputFile -> do
         alwaysRerun
         let inputFile = takeFileName outputFile -<.> "hs"
         -- TODO: dep on stridi hs files
         need [inputFile]
-        Stdout stdout <- cmd "stack runghc --package HaTeX --package singletons --package extra" [inputFile]
+        Stdout stdout <- cmd "stack test"
         writeFileChanged outputFile stdout
 
     phony "clean" $ do
         alwaysRerun
         putNormal $ "Cleaning files in " ++ buildDir
-        cmd_ "latexrun -O" buildDir "--clean-all"
         removeFilesAfter buildDir ["//*"]
