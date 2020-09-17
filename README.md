@@ -12,9 +12,13 @@ nix-build project.stridi.components.library
 ```
 But then I'm not sure how to use the output without nix x)
 
-To hack on it, just run `nix-shell`, and build with `stack build`. This project uses haskell.nix.
+To hack on it, pop into a `nix-shell` and run
+```bash
+ghcid -c 'cabal new-repl test:test --flags=ghcid' -T ":main"
+```
+This will continuously rebuild the library and run the test.
 
-To build the tests, run `stack test` and build the output with `pdflatex` or similar.
+If you want to only run the tests, run `cabal test`. The test produces a `test.pdf`.
 
 Todo:
 - include sample output in README

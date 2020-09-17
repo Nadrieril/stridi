@@ -1,21 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 import Prelude hiding ((*), (**))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Text.LaTeX hiding (cup, cap, dot)
+import Text.LaTeX hiding (cup, cap, dot, (&), perp)
 import Text.LaTeX.Base.Syntax
 import Text.LaTeX.Base.Class
-import Text.LaTeX.Packages.AMSMath hiding (cup, cap, dot)
+import Text.LaTeX.Packages.AMSMath hiding (cup, cap, dot, perp)
 import qualified Text.LaTeX as L
 import qualified Text.LaTeX.Packages.AMSMath as L
 import StriDi.Cells
 import StriDi.Render
 import StriDi.DSL
 import StriDi.DSL.Monoidal
+import Diagrams.Backend.PGF.CmdLine
+import Diagrams.Prelude
+import Diagrams.TwoD.Vector         (perp)
+
+import Diagrams.Size
 
 main :: IO ()
-main = execLaTeXT body >>= T.putStrLn . render
+-- main = execLaTeXT body >>= T.putStrLn . render
 
 draw2c :: LaTeXC l => A2Cell -> l
 draw2c = drawA2Cell $ RenderOptions 0.6 0.3
@@ -23,8 +29,8 @@ draw2c = drawA2Cell $ RenderOptions 0.6 0.3
 arrowR, arrowL :: [Text]
 arrowR = ["postaction={decorate}","decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90}}}"]
 arrowL = ["postaction={decorate}","decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90 reversed}}}"]
-dot :: [Text]
-dot = ["circle", "draw=black", "fill=black", "minimum size=1mm", "inner sep=0mm"]
+blackdot :: [Text]
+blackdot = ["circle", "draw=black", "fill=black", "minimum size=1mm", "inner sep=0mm"]
 
 p = new1C "P"
 q = new1C "Q"
@@ -49,9 +55,9 @@ tt@(tr, tl) = mkRepr1C "T"
 cup (ar, al) = new2COptions "" [] id1 (al ** ar)
 cap (ar, al) = new2COptions "" [] (ar ** al) id1
 l = new2C "l" (sr**sl) (ar**al)
-fork = new2COptions "" dot a (a**a)
-cofork = new2COptions "" dot (a**a) a
-bead = new2COptions "" dot a a
+fork = new2COptions "" blackdot a (a**a)
+cofork = new2COptions "" blackdot (a**a) a
+bead = new2COptions "" blackdot a a
 
 body :: LaTeXT IO ()
 body = do
@@ -100,3 +106,56 @@ body = do
     draw2c $ cofork
 
     raw "\\end{document}"
+
+
+type D2 = Diagram PGF
+
+-- The simplest way to construct a hbox with an envelope is to use
+--
+-- envelopedText = surfHbox mysurf "text" :: Diagram PGF V2 Double
+--
+-- which can be used just like any other diagram. However, each box like this
+-- makes a call to TeX, so for multiple boxes this can become slow.
+--
+-- This examples shows how to use the OnlineTeX monad to construct a diagram
+-- with multiple hboxs with a single call to TeX.
+
+main = renderOnlinePGF "test.pdf" absolute example
+
+example :: OnlineTex D2
+example = frame 5 . scale 10 <$> hboxLines "\\TeX"
+
+-- Use the envelope from the hbox to label the width, height and depth.
+hboxLines :: String -> OnlineTex D2
+hboxLines str = do
+  txt <- hboxOnline str
+
+  let h = envelopeV unitY txt
+      d = envelopeV unit_Y txt
+      w = envelopeV unitX txt
+
+  hArrow <- labeledArrow False "height" h
+  dArrow <- labeledArrow True "depth" d
+  wArrow <- labeledArrow False "width" w
+
+  return $ (txt <> boundingRect txt <> fromOffsets [w])
+           ||| strutX 1 ||| (hArrow === dArrow)
+           === strutY 1
+           === wArrow
+
+--
+
+-- Draw an arrow with a horizontal label above or below.
+labeledArrow :: Bool -> String -> V2 Double -> OnlineTex D2
+labeledArrow above label r = diaArrow <$> hboxOnline label
+  where
+    diaArrow txt = atDirection ((direction . rev . perp) r)
+                               (arr # translate (negated $ r^/2))
+                               (txt # centerXY # scale 0.1 # frame 0.3)
+                               # translate (r^/2)
+      where
+        rev = if above then id else negated
+        arr = arrowV' ops r
+        ops = with & arrowHead .~ spike
+                   & arrowTail .~ spike'
+                   & lengths   .~ normalized 0.015

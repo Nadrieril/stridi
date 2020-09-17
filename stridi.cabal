@@ -29,6 +29,7 @@ library
     , singletons
     , extra
     , diagrams
+    , diagrams-lib
     , diagrams-pgf
   default-language:    Haskell2010
 
@@ -40,6 +41,9 @@ test-suite test
     , text
     , HaTeX
     , stridi
+    , diagrams
+    , diagrams-lib
+    , diagrams-pgf
 
 source-repository head
   type:     git
