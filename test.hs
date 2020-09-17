@@ -93,5 +93,10 @@ body = do
     draw2c $ bead ** bead
     draw2c $ (bead ** bead) * (bead ** bead)
     draw2c $ bead ** bead ** bead
+    raw "\\\\"
+    draw2c $ ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a)) * ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a))
+    draw2c $ (id2 a ** cap (a, a) ** id2 a) * cap (a, a)
+    draw2c $ cofork * bead
+    draw2c $ cofork
 
     raw "\\end{document}"
