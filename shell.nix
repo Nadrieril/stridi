@@ -14,7 +14,11 @@ in
     exactDeps = true;
 
     # See overlays/tools.nix for more details
-    tools = { cabal = "3.2.0.0"; hlint = "2.2.11"; };
+    tools = {
+      cabal = "3.2.0.0";
+      hlint = "2.2.11";
+      hie = "unstable";
+    };
 
     buildInputs = with pkgs.haskellPackages;
       [ ghcid ];
