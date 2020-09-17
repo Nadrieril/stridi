@@ -358,8 +358,10 @@ newName = do
     return $ "n" <> T.pack (show i)
 
 -- A named tikz node along with onecell data, used for drawing wires
+-- This is important to refer to points from other columns.
 data NamedNode = NamedNode {
     nodeName :: Text,
+    nodeLocation :: Point,
     node1CData :: D1Cell
 }
 
@@ -369,11 +371,11 @@ instance Show NamedNode where
 instance Render NamedNode where
     render n = "(" <> nodeName n <> ")"
 
-namePoint :: (MonadDraw2Cell m, Render s) => D1Cell -> s -> m NamedNode
+namePoint :: MonadDraw2Cell m => D1Cell -> Point -> m NamedNode
 namePoint d p = do
     name <- newName
     drawInMatrix $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
-    return $ NamedNode name d
+    return $ NamedNode name p d
 
 pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, D1Cell)]
 pointsFromBdy (Bdy f bdy) p0 =
@@ -417,15 +419,15 @@ draw2CellAtom (LayedOutAtom { atom = MkAtom celldata _ _, location, leftBdy, rig
 
     -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boudaries
     pointsLeft <- forM leftBdy $ \(dp, d) -> do
-        ptName <- namePoint d $ "(" <> nodeName <> ".west) ++" <> render dp
         let angle = if abs (y dp) <= 0.01 then "180" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d "0" angle ptName location
-        return ptName
+        let p' = location + dp
+        drawInMatrix $ mkLine False d "0" angle p' location
+        namePoint d p'
     pointsRight <- forM rightBdy $ \(dp, d) -> do
-        ptName <- namePoint d $ "(" <> nodeName <> ".east) ++" <> render dp
         let angle = if abs (y dp) <= 0.01 then "0" else if y dp > 0 then "up" else "down"
-        drawInMatrix $ mkLine False d angle "180" location ptName
-        return ptName
+        let p' = location + dp
+        drawInMatrix $ mkLine False d angle "180" location p'
+        namePoint d p'
 
     -- Draw the node again to hide overlapping lines
     drawInMatrix $ mkNode location celldata ""

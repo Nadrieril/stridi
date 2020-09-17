@@ -125,7 +125,9 @@ type D2 = Diagram PGF
 
 
 example :: OnlineTex D2
-example = frame 5 . scale 10 <$> hboxLines "\\TeX"
+example = frame 5 . scale 10 <$> do
+    txt <- hboxOnline "$lkj \\otimes \\TeX$"
+    return txt
 
 -- Use the envelope from the hbox to label the width, height and depth.
 hboxLines :: String -> OnlineTex D2
@@ -136,16 +138,15 @@ hboxLines str = do
       d = envelopeV unit_Y txt
       w = envelopeV unitX txt
 
-  hArrow <- labeledArrow False "height" h
-  dArrow <- labeledArrow True "depth" d
-  wArrow <- labeledArrow False "width" w
+  -- hArrow <- labeledArrow False "height" h
+  -- dArrow <- labeledArrow True "depth" d
+  -- wArrow <- labeledArrow False "width" w
 
-  return $ (txt <> boundingRect txt <> fromOffsets [w])
-           ||| strutX 1 ||| (hArrow === dArrow)
-           === strutY 1
-           === wArrow
-
---
+  return txt
+  -- return $ (txt <> boundingRect txt <> fromOffsets [w])
+  --          ||| strutX 1 ||| (hArrow === dArrow)
+  --          === strutY 1
+  --          === wArrow
 
 -- Draw an arrow with a horizontal label above or below.
 labeledArrow :: Bool -> String -> V2 Double -> OnlineTex D2
