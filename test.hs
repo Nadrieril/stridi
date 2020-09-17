@@ -1,9 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies     #-}
 
 import Prelude hiding ((*), (**))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as LT
+import qualified Data.Text.Lazy.Encoding as LT
+import qualified Data.ByteString.Lazy.Char8   as LB
 import Text.LaTeX hiding (cup, cap, dot, (&), perp)
 import Text.LaTeX.Base.Syntax
 import Text.LaTeX.Base.Class
@@ -15,13 +19,22 @@ import StriDi.Render
 import StriDi.DSL
 import StriDi.DSL.Monoidal
 import Diagrams.Backend.PGF.CmdLine
-import Diagrams.Prelude
+import Diagrams.Prelude hiding (render)
 import Diagrams.TwoD.Vector         (perp)
-
 import Diagrams.Size
+import System.Texrunner (runTex)
 
 main :: IO ()
--- main = execLaTeXT body >>= T.putStrLn . render
+main = do
+    let outFile = "test.pdf"
+    ltx <- execLaTeXT body
+    ltx <- return $ render ltx
+    (_, texLog, mPDF) <- runTex "pdflatex" [] [] $ LT.encodeUtf8 $ LT.fromStrict ltx
+    case mPDF of
+      Nothing  -> putStrLn "Error, no PDF found:"
+               >> print texLog
+      Just pdf -> LB.writeFile outFile pdf
+-- main = renderOnlinePGF' "test.pdf" with example
 
 draw2c :: LaTeXC l => A2Cell -> l
 draw2c = drawA2Cell $ RenderOptions 0.6 0.3
@@ -110,17 +123,6 @@ body = do
 
 type D2 = Diagram PGF
 
--- The simplest way to construct a hbox with an envelope is to use
---
--- envelopedText = surfHbox mysurf "text" :: Diagram PGF V2 Double
---
--- which can be used just like any other diagram. However, each box like this
--- makes a call to TeX, so for multiple boxes this can become slow.
---
--- This examples shows how to use the OnlineTeX monad to construct a diagram
--- with multiple hboxs with a single call to TeX.
-
-main = renderOnlinePGF "test.pdf" absolute example
 
 example :: OnlineTex D2
 example = frame 5 . scale 10 <$> hboxLines "\\TeX"

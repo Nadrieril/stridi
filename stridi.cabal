@@ -35,15 +35,29 @@ library
 
 test-suite test
   type: exitcode-stdio-1.0
+  hs-source-dirs: src .
   main-is: test.hs
   build-depends:
       base >= 4.7 && < 5
     , text
+    , mtl
     , HaTeX
-    , stridi
+    , singletons
+    , extra
     , diagrams
     , diagrams-lib
     , diagrams-pgf
+    , stridi
+    , texrunner
+    , bytestring
+  other-modules:
+      StriDi.DSL
+    , StriDi.DSL.Monoidal
+    , StriDi.DSL.PROP
+    , StriDi.Cells
+    , StriDi.Layout
+    , StriDi.Render
+    , StriDi.TypedSeq
 
 source-repository head
   type:     git
