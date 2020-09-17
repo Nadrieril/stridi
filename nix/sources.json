@@ -1,0 +1,14 @@
+{
+    "haskell-nix": {
+        "branch": "master",
+        "description": "haskell.nix",
+        "homepage": null,
+        "owner": "input-output-hk",
+        "repo": "haskell.nix",
+        "rev": "e9de8c973edf10821bb573cdf2fdca42f95a7add",
+        "sha256": "04i6kg0g0al3mpca9mz4yzki9dpxrn9bqx5zgkcc0586z8ajpmsv",
+        "type": "tarball",
+        "url": "https://github.com/input-output-hk/haskell.nix/archive/e9de8c973edf10821bb573cdf2fdca42f95a7add.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    }
+}

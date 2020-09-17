@@ -6,6 +6,14 @@
 
 Apologies for the drastic lack of documentation; look at `test.hs` for an example usage of the library.
 
+To build it, the easiest is using nix:
+```bash
+nix-build project.stridi.components.library
+```
+But then I'm not sure how to use the output without nix x)
+
+To hack on it, just run `nix-shell`, and build with `cabal build`. This project uses haskell.nix.
+
 Todo:
 - include sample output in README
 - fix some rendering quirks
