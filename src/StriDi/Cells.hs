@@ -209,6 +209,8 @@ tensorA2 (A2Cell c1) (A2Cell c2) =
         Just Refl -> A2Cell (c1 `V2Tensor` c2)
         Nothing -> error "Type error in tensorA2"
 
+lengthA1 :: A1Cell -> Int
+lengthA1 (A1Cell c) = length1 c
 
 show1CellLabel :: V1Cell f -> String
 show1CellLabel c = intercalate (" . ") $ fmap (show . label1) $ list1Cells c

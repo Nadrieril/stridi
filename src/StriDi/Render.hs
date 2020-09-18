@@ -52,6 +52,22 @@ tgtAtom (IdAtom f) = f
 tgtAtom (MkAtom _ _ g) = g
 
 
+data TwoCellUAtom where
+    IdUAtom :: A1Cell -> TwoCellUAtom
+    MkUAtom :: D2Cell -> A1Cell -> A1Cell -> TwoCellUAtom
+
+srcUAtom :: TwoCellUAtom -> A1Cell
+srcUAtom (IdUAtom f) = f
+srcUAtom (MkUAtom _ f _) = f
+
+tgtUAtom :: TwoCellUAtom -> A1Cell
+tgtUAtom (IdUAtom f) = f
+tgtUAtom (MkUAtom _ _ g) = g
+
+untypeAtom :: TwoCellAtom f g -> TwoCellUAtom
+untypeAtom (IdAtom f) = IdUAtom (A1Cell f)
+untypeAtom (MkAtom d f g) = MkUAtom d (A1Cell f) (A1Cell g)
+
 
 data TwoCellSlice (f :: a :-> b) (g :: a :-> b) where
     EmptySlice :: V0Cell a -> TwoCellSlice (K1Id :: a :-> a) (K1Id :: a :-> a)
@@ -82,6 +98,14 @@ tensorSlice (ConsSlice atom q) s2 =
         Refl -> case assoc1Proof (tgtAtom atom) (tgtSlice q) (tgtSlice s2) of
             Refl -> ConsSlice atom $ tensorSlice q s2
 
+
+data TwoCellUSlice where
+    EmptyUSlice :: A0Cell -> TwoCellUSlice
+    ConsUSlice :: TwoCellUAtom -> TwoCellUSlice -> TwoCellUSlice
+
+untypeSlice :: TwoCellSlice f g -> TwoCellUSlice
+untypeSlice (EmptySlice a) = EmptyUSlice $ A0Cell a
+untypeSlice (ConsSlice atom q) = ConsUSlice (untypeAtom atom) (untypeSlice q)
 
 
 type TwoCellCanonForm = Interleaved TwoCellSlice V1Cell
@@ -383,15 +407,15 @@ pointsFromBdy (Bdy f bdy) p0 =
     | d <- list1Cells f
     | p <- init $ tail $ scanl (flip translatev) p0 bdy ]
 
-data LayedOutAtom f g = LayedOutAtom {
-    atom :: TwoCellAtom f g,
+data DrawableAtom = DrawableAtom {
+    uatom :: TwoCellUAtom,
     location :: Point,
     leftBdy :: [(Point, D1Cell)],
     rightBdy :: [(Point, D1Cell)]
 }
 
-layOutAtom :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> LayedOutAtom f g
-layOutAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
+mkDrawableAtom :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> DrawableAtom
+mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
     let deltaFromBorder = Point (baseLength / 2) 0
         inputs = length1 f
         outputs = length1 g
@@ -408,11 +432,38 @@ layOutAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
                     (translatev (sum $ init unbdyl) pl)
         leftBdy = pointsFromBdy bdyl (pl - location - deltaFromBorder)
         rightBdy = pointsFromBdy bdyr (pr - location + deltaFromBorder)
-     in LayedOutAtom { atom, location, leftBdy, rightBdy }
+     in DrawableAtom { uatom = untypeAtom atom, location, leftBdy, rightBdy }
 
-draw2CellAtom :: MonadDraw2Cell m => LayedOutAtom f g -> [NamedNode] -> m [NamedNode]
-draw2CellAtom (LayedOutAtom { atom = IdAtom _ }) inputNodes = return inputNodes
-draw2CellAtom (LayedOutAtom { atom = MkAtom celldata _ _, location, leftBdy, rightBdy }) inputNodes = do
+mkDrawableAtoms :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [DrawableAtom]
+mkDrawableAtoms baseLength pl pr bdyf bdyg (EmptySlice _) = []
+mkDrawableAtoms baseLength pl pr bdyf bdyg (ConsSlice atom q) = let
+        (bdySrcAtom, midSrc, bdySrcQ) = splitBoundary' (srcAtom atom) (srcSlice q) bdyf
+        (bdyTgtAtom, midTgt, bdyTgtQ) = splitBoundary' (tgtAtom atom) (tgtSlice q) bdyg
+        drawableAtom = mkDrawableAtom baseLength pl pr bdySrcAtom bdyTgtAtom atom
+        rest = mkDrawableAtoms
+                baseLength
+                (translatev (sum $ midSrc : unBdy bdySrcAtom) pl)
+                (translatev (sum $ midTgt : unBdy bdyTgtAtom) pr)
+                bdySrcQ bdyTgtQ q
+    in drawableAtom : rest
+
+data Drawable2Cell = Drawable2Cell {
+    d2CAtoms :: [[DrawableAtom]],
+    d2CLeftBdy :: [(Point, D1Cell)],
+    d2CRightBdy :: [(Point, D1Cell)]
+}
+
+mkDrawable2Cell :: Rational -> LayedOut2Cell f g -> Drawable2Cell
+mkDrawable2Cell baseLength c = let
+        p0 = Point 0 0
+        d2CAtoms = iterInterleaved c $ \(bdyl, slice, bdyr) -> mkDrawableAtoms baseLength p0 p0 bdyl bdyr slice
+        d2CLeftBdy = pointsFromBdy (headInterleaved c) p0
+        d2CRightBdy = pointsFromBdy (lastInterleaved c) p0
+    in Drawable2Cell { d2CAtoms, d2CLeftBdy, d2CRightBdy }
+
+draw2CellAtom :: MonadDraw2Cell m => DrawableAtom -> [NamedNode] -> m [NamedNode]
+draw2CellAtom (DrawableAtom { uatom = IdUAtom _ }) inputNodes = return inputNodes
+draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) inputNodes = do
     nodeName <- newName
     -- Draw the node once to enable referring to its anchors
     drawInMatrix $ mkNode location celldata ("(" <> nodeName <> ")")
@@ -438,44 +489,36 @@ draw2CellAtom (LayedOutAtom { atom = MkAtom celldata _ _, location, leftBdy, rig
 
     return pointsRight
 
-draw2CellSlice :: MonadDraw2Cell m => Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [NamedNode] -> m [NamedNode]
-draw2CellSlice pl pr bdyf bdyg (EmptySlice _) _ = return []
-draw2CellSlice pl pr bdyf bdyg (ConsSlice atom q) inputNodes = let
-        (bdySrcAtom, midSrc, bdySrcQ) = splitBoundary' (srcAtom atom) (srcSlice q) bdyf
-        (bdyTgtAtom, midTgt, bdyTgtQ) = splitBoundary' (tgtAtom atom) (tgtSlice q) bdyg
-        (inputNodesAtom, inputNodesQ) = splitAt (length1 $ srcAtom atom) inputNodes
-    in do
-        baseLength <- askBaseLength
-        let layedOutAtom = layOutAtom baseLength pl pr bdySrcAtom bdyTgtAtom atom
-        outputNodesAtom <- draw2CellAtom layedOutAtom inputNodesAtom
-        outputNodesSlice <- draw2CellSlice
-                (translatev (sum $ midSrc : unBdy bdySrcAtom) pl)
-                (translatev (sum $ midTgt : unBdy bdyTgtAtom) pr)
-                bdySrcQ bdyTgtQ q inputNodesQ
-        return $ outputNodesAtom ++ outputNodesSlice
+splitNodeList :: [DrawableAtom] -> [NamedNode] -> [(DrawableAtom, [NamedNode])]
+splitNodeList [] _ = []
+splitNodeList (atom:q) inputNodes =
+    let (inputNodesAtom, inputNodesQ) = splitAt (lengthA1 $ srcUAtom $ uatom atom) inputNodes
+     in (atom, inputNodesAtom) : splitNodeList q inputNodesQ
 
-drawLO2C :: RenderOptions -> LayedOut2Cell f g -> Text
-drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x opts 0) $ do
+draw2CellSlice :: MonadDraw2Cell m => [DrawableAtom] -> [NamedNode] -> m [NamedNode]
+draw2CellSlice atoms inputNodes =
+    concat <$> forM (splitNodeList atoms inputNodes) (uncurry draw2CellAtom)
+
+drawLO2C :: RenderOptions -> Drawable2Cell -> Text
+drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x opts 0) $ do
     baseLength <- askBaseLength
     let p0 = Point 0 0
-    let deltaFromBorder = Point (baseLength / 2) 0
+        deltaFromBorder = Point (baseLength / 2) 0
 
     drawInMatrix $ "\\matrix[column sep=3mm]{"
 
-    pointsLeft <- forM (pointsFromBdy (headInterleaved c) p0) $ \(p, d) -> do
+    pointsLeft <- forM (d2CLeftBdy drawable) $ \(p, d) -> do
         let p' = p - deltaFromBorder
         drawInMatrix $ mkLabel p' "east" d
         drawInMatrix $ mkLine False d "0" "180" p' p
         namePoint d p
     drawInMatrix $ "&\n"
 
-    pts2Cell <- foldM (\nodes f -> f nodes) pointsLeft
-        (iterInterleaved c $ \(bdyl, slice, bdyr) -> \nodes ->
-            draw2CellSlice p0 p0 bdyl bdyr slice nodes
-            <* drawInMatrix "&\n"
-        )
+    pts2Cell <- foldM (\nodes atoms -> do
+            draw2CellSlice atoms nodes <* drawInMatrix "&\n"
+        ) pointsLeft (d2CAtoms drawable)
 
-    pointsRight <- forM (pointsFromBdy (lastInterleaved c) p0) $ \(p, d) -> do
+    pointsRight <- forM (d2CRightBdy drawable) $ \(p, d) -> do
         let p' = p + deltaFromBorder
         drawInMatrix $ mkLabel p' "west" d
         drawInMatrix $ mkLine False d "0" "180" p p'
@@ -489,6 +532,7 @@ drawLO2C opts c = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x opts 0)
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
     . drawLO2C opts
+    . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
     . twoCellToCanonForm
 
