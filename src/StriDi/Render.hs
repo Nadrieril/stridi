@@ -23,19 +23,33 @@ import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
 import Control.Exception.Base (assert)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.ByteString.Lazy.Char8   as LB
+import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Unsafe.Coerce (unsafeCoerce)
 import Debug.Trace
 import Text.LaTeX
 import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
 import Text.LaTeX.Base.Syntax (LaTeX(..))
+import qualified Diagrams.Prelude as Diag
+import Diagrams.Prelude ((#), frame, boundingRect, (===), (|||), V2, r2)
+import Diagrams.Backend.PGF.CmdLine
+import Diagrams.Backend.PGF.Surface
+import Diagrams.TwoD.Vector         (perp)
+import Diagrams.TwoD.Size (height)
+import Diagrams.Size
+import System.Texrunner (runTex)
+import System.Texrunner.Online (runOnlineTex, runOnlineTex', texPutStrLn)
 
 import StriDi.TypedSeq
 import StriDi.Cells
 
+type D2 = Diag.Diagram PGF
+
 
 traceShowIdLbl lbl x = trace (lbl ++ ": " ++ show x) x
 
-approx :: Rational -> Float
+approx :: Rational -> Double
 approx x = realToFrac (round (100 * realToFrac x)) / 100
 
 
@@ -529,9 +543,49 @@ drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x 
     forM_ (zip pts2Cell pointsRight) $ \(pl, pr) ->
         drawOutMatrix $ mkLine True (node1CData pl) "0" "180" pl pr
 
+
+
+-- Draw the given text in a box
+mkNodeDiag :: String -> OnlineTex D2
+mkNodeDiag [] = return mempty
+mkNodeDiag str = do
+    txt <- hboxOnline str
+    -- By default, tikz adds an inner padding of 1/3em to rectangles around text
+    -- For now I assume the height is 1em. This isn't very good.
+    let h = height txt
+        inner_sep = h/3
+    txt <- return $ txt # frame inner_sep
+    -- Default tikz line thickness is 0.4pt (called thin).
+    -- Seems to correspond with default diagrams line thickness too
+    return $ (txt <> boundingRect txt)
+
+pointToVec :: Point -> V2 Double
+pointToVec (Point x y) = Diag.scale 30 $ r2 (approx x, approx y)
+
+draw2CellAtomDiagrams :: DrawableAtom -> OnlineTex D2
+draw2CellAtomDiagrams (DrawableAtom { uatom = IdUAtom _ }) = return mempty
+draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
+    let label = T.unpack $ render $ label2 celldata
+    Diag.translate (pointToVec location) <$> mkNodeDiag label
+
+drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
+drawLO2CDiagrams opts drawable = let
+        render = T.decodeUtf8 . LB.toStrict . toLazyByteString . Diag.renderDia PGF Diag.with
+        rendered :: OnlineTex D2
+        rendered = do
+            columns <- forM (d2CAtoms drawable) $ \atoms -> do
+                nodes <- forM atoms $ \atom -> do
+                    draw2CellAtomDiagrams atom
+                return $ mconcat nodes
+            return $ foldr ((|||)) mempty columns
+    in render $ surfOnlineTex Diag.with rendered
+
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
-draw2Cell opts = fromLaTeX . TeXEnv "tikzpicture" [] . raw
-    . drawLO2C opts
+draw2Cell opts =
+      (\x ->
+         (fromLaTeX . TeXEnv "tikzpicture" [] . raw . drawLO2C opts $ x)
+      <> (fromLaTeX . raw . drawLO2CDiagrams opts $ x)
+      )
     . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
     . twoCellToCanonForm
