@@ -584,7 +584,7 @@ draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
       (\x ->
          (fromLaTeX . TeXEnv "tikzpicture" [] . raw . drawLO2C opts $ x)
-      <> (fromLaTeX . raw . drawLO2CDiagrams opts $ x)
+      -- <> (fromLaTeX . raw . drawLO2CDiagrams opts $ x)
       )
     . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
