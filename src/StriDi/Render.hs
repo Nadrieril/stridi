@@ -479,10 +479,7 @@ draw2CellAtom :: MonadDraw2Cell m => DrawableAtom -> [NamedNode] -> m [NamedNode
 draw2CellAtom (DrawableAtom { uatom = IdUAtom _ }) inputNodes = return inputNodes
 draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) inputNodes = do
     nodeName <- newName
-    -- Draw the node once to enable referring to its anchors
-    drawInMatrix $ mkNode location celldata ("(" <> nodeName <> ")")
-
-    -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boudaries
+    -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boundaries
     pointsLeft <- forM leftBdy $ \(dp, d) -> do
         let angle = if abs (y dp) <= 0.01 then "180" else if y dp > 0 then "up" else "down"
         let p' = location + dp
@@ -494,8 +491,8 @@ draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, r
         drawInMatrix $ mkLine False d angle "180" location p'
         namePoint d p'
 
-    -- Draw the node again to hide overlapping lines
-    drawInMatrix $ mkNode location celldata ""
+    -- Draw the node
+    drawInMatrix $ mkNode location celldata ("(" <> nodeName <> ")")
 
     -- Link with previously drawn cells
     forM_ (zip inputNodes pointsLeft) $ \(pl, pr) ->
