@@ -574,7 +574,7 @@ placeAlongTrail trail param = let
     in moveTo point . rotateTo (direction tangent)
 
 pointToVec :: Point -> V2 Double
-pointToVec (Point x y) = Diag.scale 40 $ r2 (approx x, approx y)
+pointToVec (Point x y) = scale 30 $ r2 (approx x, approx y)
 
 strokeWire :: D1Cell -> Bool -> [Segment Closed V2 Double] -> D2
 strokeWire wire reverse segments = let
@@ -614,7 +614,7 @@ draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, le
         let segment =
                 if abs (y dp) <= 0.01
                 then straight d
-                else bézier3 ctrlpt ctrlpt d
+                else bézier3 (ctrlpt/2) (d + (ctrlpt - d)/2) d
         return $ strokeWire wire reverse [segment]
     return $ Diag.translate (pointToVec location) $ node <> mconcat wires
 

@@ -45,6 +45,7 @@ main = do
                 "\\documentclass{article}",
                 "\\usepackage{pgfcore}",
                 "\\pagenumbering{gobble}",
+                "\\usepackage[a4paper, margin=1cm]{geometry}",
                 "\\usepackage{tikz}",
                 "\\usepackage{amsmath}",
                 "\\usetikzlibrary{decorations.markings, arrows, matrix}"
@@ -70,7 +71,7 @@ main = do
 
 
 draw2c :: LaTeXC l => A2Cell -> l
-draw2c = drawA2Cell $ RenderOptions 0.6 0.3
+draw2c = drawA2Cell $ RenderOptions 0.5 0.5
 
 arrowR, arrowL :: [Text]
 arrowR = ["postaction={decorate}","decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90}}}"]
@@ -118,10 +119,10 @@ body = do
     -- lens laws
     draw2c $ l * (id2 ar ** cup aa ** id2 al)
     draw2c $ (id2 sr ** cup ss ** id2 sl) * (l ** l)
+    raw "\\\\"
     -- snakes
     draw2c $ (id2 ar ** cup aa) * (cap aa ** id2 ar)
     draw2c $ (cup aa ** id2 al) * (id2 al ** cap aa)
-    draw2c spider
     raw "\\\\"
     -- -- back-to-back
     -- draw2c $ cap aa * cup bb
@@ -132,11 +133,13 @@ body = do
     -- draw2c $ lone * lone * lone ** lone * lone * lone
     -- draw2c $ id2 a ** lone ** id2 a
     -- raw "\\\\"
+    draw2c spider
+    draw2c $ fork * cofork
+    raw "\\\\"
     draw2c $ fork ** cofork
     draw2c $ (id2 a ** cofork) * (fork ** id2 a)
     draw2c $ (fork ** id2 a ** id2 a) * (id2 a ** id2 a ** cofork)
     draw2c $ (fork ** id2 a) * (id2 a ** cofork)
-    draw2c $ fork * cofork
     -- raw "\\\\"
     -- draw2c $ cofork ** fork
     -- draw2c $ (cofork ** id2 a) * (id2 a ** fork)
