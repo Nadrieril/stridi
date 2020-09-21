@@ -546,15 +546,21 @@ drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x 
 mkNodeDiag :: String -> OnlineTex D2
 mkNodeDiag [] = return mempty
 mkNodeDiag str = do
-    txt <- hboxOnline $ "\\ensuremath{" ++ str ++ "}"
     -- By default, tikz adds an inner padding of 1/3em to rectangles around text
-    -- For now I assume the height is 1em. This isn't very good.
-    let h = height txt
-        inner_sep = h/3
-    txt <- return $ txt # frame inner_sep
+    -- I measure 1em from the width of an "M"
+    -- TODO: measure only once
+    m :: D2 <- hboxOnline "M"
+    let em = width m
+        inner_sep = em/3
+
+    txt <- hboxOnline $ "\\ensuremath{" ++ str ++ "}"
+    -- Center and add inner padding
+    txt <- return $ txt # centerXY # frame inner_sep
+    -- Draw rectangle around
     -- Default tikz line thickness is 0.4pt (called thin).
-    -- Seems to correspond with default diagrams line thickness too
-    return $ centerXY $ (txt <> boundingRect txt # fc white)
+    -- Seems like I can't get line thickness small enough in `diagrams`.
+    let rect = boundingRect txt # fc white # lw thin
+    return $ txt <> rect
 
 -- Moves a diagram along a trail at the given parameter, rotating it to match
 -- the direction of the trail.
