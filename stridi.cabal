@@ -31,6 +31,8 @@ library
     , diagrams
     , diagrams-lib
     , diagrams-pgf
+    , texrunner
+    , bytestring
   default-language:    Haskell2010
 
 test-suite test

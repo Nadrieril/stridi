@@ -32,7 +32,7 @@ import Text.LaTeX
 import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
 import Text.LaTeX.Base.Syntax (LaTeX(..))
 import qualified Diagrams.Prelude as Diag
-import Diagrams.Prelude ((#), frame, boundingRect, (===), (|||), V2, r2)
+import Diagrams.Prelude hiding (Render, trace, defaultBoundary, Point, translate, render, namePoint)
 import Diagrams.Backend.PGF.CmdLine
 import Diagrams.Backend.PGF.Surface
 import Diagrams.TwoD.Vector         (perp)
@@ -549,7 +549,7 @@ drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x 
 mkNodeDiag :: String -> OnlineTex D2
 mkNodeDiag [] = return mempty
 mkNodeDiag str = do
-    txt <- hboxOnline str
+    txt <- hboxOnline $ "\\ensuremath{" ++ str ++ "}"
     -- By default, tikz adds an inner padding of 1/3em to rectangles around text
     -- For now I assume the height is 1em. This isn't very good.
     let h = height txt
@@ -557,16 +557,30 @@ mkNodeDiag str = do
     txt <- return $ txt # frame inner_sep
     -- Default tikz line thickness is 0.4pt (called thin).
     -- Seems to correspond with default diagrams line thickness too
-    return $ (txt <> boundingRect txt)
+    return $ centerXY $ (txt <> boundingRect txt)
 
 pointToVec :: Point -> V2 Double
-pointToVec (Point x y) = Diag.scale 30 $ r2 (approx x, approx y)
+pointToVec (Point x y) = Diag.scale 40 $ r2 (approx x, approx y)
 
 draw2CellAtomDiagrams :: DrawableAtom -> OnlineTex D2
-draw2CellAtomDiagrams (DrawableAtom { uatom = IdUAtom _ }) = return mempty
+draw2CellAtomDiagrams (DrawableAtom { uatom = IdUAtom _, location, leftBdy, rightBdy }) = do
+    wires <- forM (zip leftBdy rightBdy) $ \((dpl, dl), (dpr, dr)) -> do
+        let pl = pointToVec dpl
+        let pr = pointToVec dpr
+        return $ fromLocSegments $ [straight (pr - pl)] `at` (Diag.origin .+^ pl)
+    return $ Diag.translate (pointToVec location) $ mconcat wires
 draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
     let label = T.unpack $ render $ label2 celldata
-    Diag.translate (pointToVec location) <$> mkNodeDiag label
+    node <- mkNodeDiag label
+    wires <- forM (leftBdy ++ rightBdy) $ \(dp, d) -> do
+        let d = pointToVec dp
+        let ctrlpt = r2 (0, snd $ unr2 d)
+        let segment =
+                if abs (y dp) <= 0.01
+                then straight d
+                else bézier3 ctrlpt ctrlpt d
+        return $ fromSegments [segment]
+    return $ Diag.translate (pointToVec location) $ mconcat wires <> node
 
 drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
