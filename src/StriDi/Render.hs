@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DataKinds, KindSignatures, TypeOperators, GADTs, TypeApplications,
     ParallelListComp, ScopedTypeVariables, RankNTypes, PolyKinds, TypeInType, FlexibleContexts,
     RecordWildCards, AllowAmbiguousTypes, ViewPatterns, TypeFamilies, TypeFamilyDependencies,
-    ConstraintKinds, NamedFieldPuns #-}
+    ConstraintKinds, TupleSections, NamedFieldPuns #-}
 {-# OPTIONS_GHC -Wno-missing-methods #-}
 
 module StriDi.Render
@@ -28,7 +28,7 @@ import qualified Data.ByteString.Lazy.Char8   as LB
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Unsafe.Coerce (unsafeCoerce)
 import Debug.Trace
-import Text.LaTeX
+import Text.LaTeX hiding ((&))
 import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
 import Text.LaTeX.Base.Syntax (LaTeX(..))
 import qualified Diagrams.Prelude as Diag
@@ -554,30 +554,63 @@ mkNodeDiag str = do
     txt <- return $ txt # frame inner_sep
     -- Default tikz line thickness is 0.4pt (called thin).
     -- Seems to correspond with default diagrams line thickness too
-    return $ centerXY $ (txt <> boundingRect txt)
+    return $ centerXY $ (txt <> boundingRect txt # fc white)
+
+-- Moves a diagram along a trail at the given parameter, rotating it to match
+-- the direction of the trail.
+placeAlongTrail ::
+    ( InSpace V2 (N t) t, Parametric t, Parametric (Tangent t), Codomain t (N t) ~ Diag.Point V2 (N d)
+    , InSpace V2 (N d) d, OrderedField (N d), Transformable d, HasOrigin d
+    ) => t -> N t -> d -> d
+placeAlongTrail trail param = let
+        point = trail `atParam` param
+        tangent = trail `tangentAtParam` param
+    in moveTo point . rotateTo (direction tangent)
 
 pointToVec :: Point -> V2 Double
 pointToVec (Point x y) = Diag.scale 40 $ r2 (approx x, approx y)
 
+strokeWire :: D1Cell -> Bool -> [Segment Closed V2 Double] -> D2
+strokeWire wire reverse segments = let
+        trail = trailFromSegments segments `at` origin
+        -- Temporary hack
+        isArrowR =
+            "decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90}}}" `elem` tikzDecorations1 wire
+        isArrowL =
+            "decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90 reversed}}}" `elem` tikzDecorations1 wire
+        arrow =
+            if isArrowR || isArrowL
+            then let
+                    needReverse = isArrowL && not reverse || isArrowR && reverse
+                    arrow = scale 4 $
+                            fromOffsets [r2 (1, 0) # rotate (3/8 @@ turn)]
+                         <> fromOffsets [r2 (1, 0) # rotate (-3/8 @@ turn)]
+                    arrow' = if needReverse then rotate (1/2 @@ turn) arrow else arrow
+                 in placeAlongTrail trail 0.5 arrow'
+            else mempty
+    in arrow <> stroke trail
+
 draw2CellAtomDiagrams :: DrawableAtom -> OnlineTex D2
 draw2CellAtomDiagrams (DrawableAtom { uatom = IdUAtom _, location, leftBdy, rightBdy }) = do
-    wires <- forM (zip leftBdy rightBdy) $ \((dpl, dl), (dpr, dr)) -> do
+    wires <- forM (zip leftBdy rightBdy) $ \((dpl, wire), (dpr, _)) -> do
         let pl = pointToVec dpl
         let pr = pointToVec dpr
-        return $ fromLocSegments $ [straight (pr - pl)] `at` (Diag.origin .+^ pl)
+        return $ Diag.translate pl $ strokeWire wire False [straight (pr - pl)]
     return $ Diag.translate (pointToVec location) $ mconcat wires
 draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
     let label = T.unpack $ render $ label2 celldata
-    node <- mkNodeDiag label
-    wires <- forM (leftBdy ++ rightBdy) $ \(dp, d) -> do
+    node <- case label of
+              _ | "circle" `elem` tikzOptions2 celldata -> return $ circle 1.5 # fc black
+              _ -> mkNodeDiag label
+    wires <- forM (map (True,) leftBdy ++ map (False,) rightBdy) $ \(reverse, (dp, wire)) -> do
         let d = pointToVec dp
-        let ctrlpt = r2 (0, snd $ unr2 d)
+        let ctrlpt = d & _x .~ 0
         let segment =
                 if abs (y dp) <= 0.01
                 then straight d
                 else bézier3 ctrlpt ctrlpt d
-        return $ fromSegments [segment]
-    return $ Diag.translate (pointToVec location) $ mconcat wires <> node
+        return $ strokeWire wire reverse [segment]
+    return $ Diag.translate (pointToVec location) $ node <> mconcat wires
 
 drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
