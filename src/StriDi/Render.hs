@@ -431,7 +431,7 @@ mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
     let deltaFromBorder = Point (baseLength / 2) 0
         inputs = length1 f
         outputs = length1 g
-        location = case () of
+        midpt = case () of
             _ | inputs == 0 && outputs == 0 ->
                 translatev ((head unbdyl) / 2) pl
             _ | inputs == 0 ->
@@ -442,8 +442,9 @@ mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
                 midPoint
                     (translatev (head unbdyl) pl)
                     (translatev (sum $ init unbdyl) pl)
-        leftBdy = pointsFromBdy bdyl (pl - location - deltaFromBorder)
-        rightBdy = pointsFromBdy bdyr (pr - location + deltaFromBorder)
+        location = midpt + deltaFromBorder
+        leftBdy = pointsFromBdy bdyl (pl - midpt - deltaFromBorder)
+        rightBdy = pointsFromBdy bdyr (pr - midpt + deltaFromBorder)
      in DrawableAtom { uatom = untypeAtom atom, location, leftBdy, rightBdy }
 
 mkDrawableAtoms :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [DrawableAtom]
@@ -645,7 +646,7 @@ drawLO2CDiagrams opts drawable = let
             let horizStep = pointToVec (Point baseLength 0)
             startLabels <- forM (d2CLeftBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
-                return $ translate (pointToVec dp - horizStep/2) $ alignXMax lbl
+                return $ translate (pointToVec dp) $ alignXMax lbl
             firstCol <- drawIntermediateCol leftBdy (head (d2CAtoms drawable))
             columns <- forM (d2CAtoms drawable) $ \atoms -> do
                 nodes <- forM atoms $ draw2CellAtomDiagrams False
@@ -653,7 +654,7 @@ drawLO2CDiagrams opts drawable = let
                 return $ mconcat nodes <> intermediate
             endLabels <- forM (d2CRightBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
-                return $ translate (pointToVec dp - horizStep/2) $ alignXMin lbl
+                return $ translate (pointToVec dp) $ alignXMin lbl
             return $
                 mconcat startLabels
                 <> translate (-horizStep) firstCol
