@@ -17,7 +17,7 @@ import Data.Type.Equality
 import Data.Proxy
 import Data.List
 import Data.List.Extra
-import Control.Arrow ((***), first)
+import Control.Arrow ((***), first, second)
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
@@ -467,10 +467,13 @@ data Drawable2Cell = Drawable2Cell {
 
 mkDrawable2Cell :: Rational -> LayedOut2Cell f g -> Drawable2Cell
 mkDrawable2Cell baseLength c = let
-        p0 = Point 0 0
-        d2CAtoms = iterInterleaved c $ \(bdyl, slice, bdyr) -> mkDrawableAtoms baseLength p0 p0 bdyl bdyr slice
-        d2CLeftBdy = pointsFromBdy (headInterleaved c) p0
-        d2CRightBdy = pointsFromBdy (lastInterleaved c) p0
+        (p, d2CAtoms) =
+            second reverse $ -- Note to self: this is very fun to comment out with the old tikz renderer. It gets very wobbly.
+            foldlInterleaved c (Point baseLength 0, []) $ \(bdyl, slice, bdyr) (p, columns) ->
+                let column = mkDrawableAtoms baseLength p p bdyl bdyr slice
+                 in (translateh (2*baseLength) p, column:columns)
+        d2CLeftBdy = pointsFromBdy (headInterleaved c) (Point 0 0)
+        d2CRightBdy = pointsFromBdy (lastInterleaved c) p
     in Drawable2Cell { d2CAtoms, d2CLeftBdy, d2CRightBdy }
 
 draw2CellAtom :: MonadDraw2Cell m => DrawableAtom -> [NamedNode] -> m [NamedNode]
@@ -634,16 +637,12 @@ drawLO2CDiagrams opts drawable = let
         rendered :: OnlineTex D2
         rendered = do
             let horizStep = pointToVec (Point baseLength 0)
+            firstCol <- drawIntermediateCol leftBdy (head (d2CAtoms drawable))
             columns <- forM (zip [0..] $ d2CAtoms drawable) $ \(i, atoms) -> do
-                intermediate <- drawIntermediateCol leftBdy atoms
-                nodes <- forM atoms $ \atom -> do
-                    draw2CellAtomDiagrams False atom
-                return $
-                    translate (2 * fromInteger i * horizStep) $
-                    intermediate <> translate horizStep (mconcat nodes)
-            final <- drawIntermediateCol rightBdy (last (d2CAtoms drawable))
-            let numberOfColumns = fromInteger $ toInteger $ length $ d2CAtoms drawable
-            return $ mconcat columns <> translate ((2 * numberOfColumns - 1) * horizStep) final
+                intermediate <- drawIntermediateCol rightBdy atoms
+                nodes <- forM atoms $ draw2CellAtomDiagrams False
+                return $ mconcat nodes <> intermediate
+            return $ translate (-horizStep) firstCol <> mconcat columns
     in render $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l

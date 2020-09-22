@@ -124,42 +124,44 @@ body = do
     draw2c $ (id2 ar ** cup aa) * (cap aa ** id2 ar)
     draw2c $ (cup aa ** id2 al) * (id2 al ** cap aa)
     raw "\\\\"
-    -- -- back-to-back
-    -- draw2c $ cap aa * cup bb
-    -- draw2c $ cap aa ** cup bb
-    -- draw2c $ cup bb ** cap aa
-    -- draw2c $ id2 id1 * lone ** lone * id2 id1
-    -- draw2c $ (id2 id1 ** lone) * (lone ** id2 id1)
-    -- draw2c $ lone * lone * lone ** lone * lone * lone
-    -- draw2c $ id2 a ** lone ** id2 a
-    -- raw "\\\\"
+    -- back-to-back
+    draw2c $ cap aa * cup bb
+    draw2c $ cap aa ** cup bb
+    draw2c $ cup bb ** cap aa
+    raw "\\\\"
+    draw2c $ id2 id1 * lone ** lone * id2 id1
+    draw2c $ (id2 id1 ** lone) * (lone ** id2 id1)
+    draw2c $ lone * lone * lone ** lone * lone * lone
+    draw2c $ id2 a ** lone ** id2 a
+    raw "\\\\"
     draw2c spider
     draw2c $ fork * cofork
     raw "\\\\"
     draw2c $ fork ** cofork
     draw2c $ (id2 a ** cofork) * (fork ** id2 a)
     draw2c $ (fork ** id2 a ** id2 a) * (id2 a ** id2 a ** cofork)
+    raw "\\\\"
     draw2c $ (fork ** id2 a) * (id2 a ** cofork)
-    -- raw "\\\\"
-    -- draw2c $ cofork ** fork
-    -- draw2c $ (cofork ** id2 a) * (id2 a ** fork)
-    -- draw2c $ (id2 a ** id2 a ** fork) * (cofork ** id2 a ** id2 a)
-    -- draw2c $ (id2 a ** fork) * (cofork ** id2 a)
-    -- raw "\\\\"
-    -- draw2c $ cofork ** cofork
-    -- draw2c $ cofork ** id2 a ** cofork
-    -- draw2c $ id2 a ** cofork
-    -- draw2c $ cofork ** id2 a
-    -- raw "\\\\"
-    -- draw2c $ bead * bead
-    -- draw2c $ bead ** bead
-    -- draw2c $ (bead ** bead) * (bead ** bead)
-    -- draw2c $ bead ** bead ** bead
-    -- raw "\\\\"
-    -- draw2c $ ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a)) * ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a))
-    -- draw2c $ (id2 a ** cap (a, a) ** id2 a) * cap (a, a)
-    -- draw2c $ cofork * bead
-    -- draw2c $ cofork
+    draw2c $ cofork ** fork
+    draw2c $ (cofork ** id2 a) * (id2 a ** fork)
+    raw "\\\\"
+    draw2c $ (id2 a ** id2 a ** fork) * (cofork ** id2 a ** id2 a)
+    draw2c $ (id2 a ** fork) * (cofork ** id2 a)
+    raw "\\\\"
+    draw2c $ cofork ** cofork
+    draw2c $ cofork ** id2 a ** cofork
+    draw2c $ id2 a ** cofork
+    draw2c $ cofork ** id2 a
+    raw "\\\\"
+    draw2c $ bead * bead
+    draw2c $ bead ** bead
+    draw2c $ (bead ** bead) * (bead ** bead) * (bead ** bead)
+    raw "\\\\"
+    draw2c $ ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a)) * ((fork ** fork) * (id2 a ** cap (a, a) ** id2 a))
+    draw2c $ (id2 a ** cap (a, a) ** id2 a) * cap (a, a)
+    raw "\\\\"
+    draw2c $ cofork * bead
+    draw2c $ cofork
 
     -- raw "\\end{document}"
 

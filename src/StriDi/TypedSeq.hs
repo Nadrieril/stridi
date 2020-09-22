@@ -47,6 +47,10 @@ iterInterleaved :: Interleaved f g a b -> (forall a b. (g a, f a b, g b) -> r) -
 iterInterleaved (NilIntl ga) f = []
 iterInterleaved (CmpIntl ga fab q) f = f (ga, fab, headInterleaved q) : iterInterleaved q f
 
+foldlInterleaved :: Interleaved f g a b -> r -> (forall a b. (g a, f a b, g b) -> r -> r) -> r
+foldlInterleaved (NilIntl ga) e f = e
+foldlInterleaved (CmpIntl ga fab q) e f = foldlInterleaved q (f (ga, fab, headInterleaved q) e) f
+
 mergeInterleaved :: Interleaved f g a b -> Interleaved f g b c -> Interleaved f g a c
 mergeInterleaved (NilIntl _) fbc = fbc
 mergeInterleaved (CmpIntl ga fab q) fbc = CmpIntl ga fab $ mergeInterleaved q fbc
