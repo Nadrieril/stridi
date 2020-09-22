@@ -359,60 +359,6 @@ midPoint :: Point -> Point -> Point
 midPoint p1 p2 = scalePoint (1/2) $ p1 + p2
 
 
-
-type MonadDraw2Cell m = (MonadReader RenderOptions m, MonadWriter (Text, Text) m, MonadState Int m)
-
-ensuremath :: LaTeXC l => l -> l
-ensuremath = comm1 "ensuremath"
-
-mkLine decorate d a1 a2 p1 p2 =
-    "\\draw[" <> T.intercalate ", " (tikzOptions1 d ++ if decorate then tikzDecorations1 d else []) <> "] "
-    <> render p1
-    <> " to[out=" <> a1 <> ", in=" <> a2 <> "] "
-    <> render p2
-    <> ";\n"
-mkLabel p anchor d =
-    "\\node at " <> render p
-    <> " [anchor=" <> anchor <> "] {"
-    <> render (ensuremath $ label1 d)
-    <> "};\n"
-mkNode p d name =
-    "\\node at " <> render p
-    <> " [" <> T.intercalate ", " (tikzOptions2 d) <> "] "
-    <> name
-    <> " {" <> render (ensuremath $ label2 d) <> "};\n"
-
-drawInMatrix :: MonadDraw2Cell m => Text -> m ()
-drawInMatrix t = tell (t, "")
-drawOutMatrix :: MonadDraw2Cell m => Text -> m ()
-drawOutMatrix t = tell ("", t)
-
-newName :: MonadDraw2Cell m => m Text
-newName = do
-    (i :: Int) <- get
-    modify (+1)
-    return $ "n" <> T.pack (show i)
-
--- A named tikz node along with onecell data, used for drawing wires
--- This is important to refer to points from other columns.
-data NamedNode = NamedNode {
-    nodeName :: Text,
-    nodeLocation :: Point,
-    node1CData :: D1Cell
-}
-
-instance Show NamedNode where
-    show = T.unpack . render
-
-instance Render NamedNode where
-    render n = "(" <> nodeName n <> ")"
-
-namePoint :: MonadDraw2Cell m => D1Cell -> Point -> m NamedNode
-namePoint d p = do
-    name <- newName
-    drawInMatrix $ "\\path " <> render p <> " node[coordinate] (" <> name <> ") {};\n"
-    return $ NamedNode name p d
-
 pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, D1Cell)]
 pointsFromBdy (Bdy f bdy) p0 =
     [ (p, d)
@@ -476,73 +422,6 @@ mkDrawable2Cell baseLength c = let
         d2CLeftBdy = pointsFromBdy (headInterleaved c) (Point 0 0)
         d2CRightBdy = pointsFromBdy (lastInterleaved c) p
     in Drawable2Cell { d2CAtoms, d2CLeftBdy, d2CRightBdy }
-
-draw2CellAtom :: MonadDraw2Cell m => DrawableAtom -> [NamedNode] -> m [NamedNode]
-draw2CellAtom (DrawableAtom { uatom = IdUAtom _ }) inputNodes = return inputNodes
-draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) inputNodes = do
-    nodeName <- newName
-    -- Draw input and output wires, naming the nodes to be able to link them across matrix cell boundaries
-    pointsLeft <- forM leftBdy $ \(dp, d) -> do
-        let angle = if abs (y dp) <= 0.01 then "180" else if y dp > 0 then "up" else "down"
-        let p' = location + dp
-        drawInMatrix $ mkLine False d "0" angle p' location
-        namePoint d p'
-    pointsRight <- forM rightBdy $ \(dp, d) -> do
-        let angle = if abs (y dp) <= 0.01 then "0" else if y dp > 0 then "up" else "down"
-        let p' = location + dp
-        drawInMatrix $ mkLine False d angle "180" location p'
-        namePoint d p'
-
-    -- Draw the node
-    drawInMatrix $ mkNode location celldata ("(" <> nodeName <> ")")
-
-    -- Link with previously drawn cells
-    forM_ (zip inputNodes pointsLeft) $ \(pl, pr) ->
-        drawOutMatrix $ mkLine True (node1CData pl) "0" "180" pl pr
-
-    return pointsRight
-
-splitNodeList :: [DrawableAtom] -> [NamedNode] -> [(DrawableAtom, [NamedNode])]
-splitNodeList [] _ = []
-splitNodeList (atom:q) inputNodes =
-    let (inputNodesAtom, inputNodesQ) = splitAt (lengthA1 $ srcUAtom $ uatom atom) inputNodes
-     in (atom, inputNodesAtom) : splitNodeList q inputNodesQ
-
-draw2CellSlice :: MonadDraw2Cell m => [DrawableAtom] -> [NamedNode] -> m [NamedNode]
-draw2CellSlice atoms inputNodes =
-    concat <$> forM (splitNodeList atoms inputNodes) (uncurry draw2CellAtom)
-
-drawLO2C :: RenderOptions -> Drawable2Cell -> Text
-drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x opts 0) $ do
-    baseLength <- askBaseLength
-    let p0 = Point 0 0
-        deltaFromBorder = Point (baseLength / 2) 0
-
-    drawInMatrix $ "\\matrix[column sep=3mm]{"
-
-    pointsLeft <- forM (d2CLeftBdy drawable) $ \(p, d) -> do
-        let p' = p - deltaFromBorder
-        drawInMatrix $ mkLabel p' "east" d
-        drawInMatrix $ mkLine False d "0" "180" p' p
-        namePoint d p
-    drawInMatrix $ "&\n"
-
-    pts2Cell <- foldM (\nodes atoms -> do
-            draw2CellSlice atoms nodes <* drawInMatrix "&\n"
-        ) pointsLeft (d2CAtoms drawable)
-
-    pointsRight <- forM (d2CRightBdy drawable) $ \(p, d) -> do
-        let p' = p + deltaFromBorder
-        drawInMatrix $ mkLabel p' "west" d
-        drawInMatrix $ mkLine False d "0" "180" p p'
-        namePoint d p
-
-    drawInMatrix $ "\\\\};"
-
-    forM_ (zip pts2Cell pointsRight) $ \(pl, pr) ->
-        drawOutMatrix $ mkLine True (node1CData pl) "0" "180" pl pr
-
-
 
 -- Draw the given text
 drawLatexText :: String -> OnlineTex D2
@@ -664,11 +543,7 @@ drawLO2CDiagrams opts drawable = let
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
-    fromLaTeX
-    . (\x ->
-         (raw . drawLO2CDiagrams opts $ x)
-      -- <> (TeXEnv "tikzpicture" [] . raw . drawLO2C opts $ x)
-      )
+    fromLaTeX . raw . drawLO2CDiagrams opts
     . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
     . twoCellToCanonForm

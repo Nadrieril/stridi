@@ -46,9 +46,7 @@ main = do
                 "\\usepackage{pgfcore}",
                 "\\pagenumbering{gobble}",
                 "\\usepackage[a4paper, margin=1cm]{geometry}",
-                "\\usepackage{tikz}",
-                "\\usepackage{amsmath}",
-                "\\usetikzlibrary{decorations.markings, arrows, matrix}"
+                "\\usepackage{amsmath}"
             ])
         surf = opts ^. surface
         toByteString = LB.toStrict . toLazyByteString
