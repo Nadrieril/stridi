@@ -633,13 +633,17 @@ drawLO2CDiagrams opts drawable = let
                 })
         rendered :: OnlineTex D2
         rendered = do
-            columns <- forM (d2CAtoms drawable) $ \atoms -> do
+            let horizStep = pointToVec (Point baseLength 0)
+            columns <- forM (zip [0..] $ d2CAtoms drawable) $ \(i, atoms) -> do
                 intermediate <- drawIntermediateCol leftBdy atoms
                 nodes <- forM atoms $ \atom -> do
                     draw2CellAtomDiagrams False atom
-                return $ intermediate ||| mconcat nodes
+                return $
+                    translate (2 * fromInteger i * horizStep) $
+                    intermediate <> translate horizStep (mconcat nodes)
             final <- drawIntermediateCol rightBdy (last (d2CAtoms drawable))
-            return $ foldr ((|||)) mempty columns ||| final
+            let numberOfColumns = fromInteger $ toInteger $ length $ d2CAtoms drawable
+            return $ mconcat columns <> translate ((2 * numberOfColumns - 1) * horizStep) final
     in render $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
