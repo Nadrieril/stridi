@@ -543,10 +543,10 @@ drawLO2C opts drawable = (\(inm, outm) -> inm <> outm) $ snd $ (\x -> evalRWS x 
 
 
 
--- Draw the given text in a box
-mkNodeDiag :: String -> OnlineTex D2
-mkNodeDiag [] = return mempty
-mkNodeDiag str = do
+-- Draw the given text
+drawLatexText :: String -> OnlineTex D2
+drawLatexText [] = return mempty
+drawLatexText str = do
     -- By default, tikz adds an inner padding of 1/3em to rectangles around text
     -- I measure 1em from the width of an "M"
     -- TODO: measure only once
@@ -556,7 +556,13 @@ mkNodeDiag str = do
 
     txt <- hboxOnline $ "\\ensuremath{" ++ str ++ "}"
     -- Center and add inner padding
-    txt <- return $ txt # centerXY # frame inner_sep
+    return $ txt # centerXY # frame inner_sep
+
+-- Draw the given text in a box
+mkNodeDiag :: String -> OnlineTex D2
+mkNodeDiag [] = return mempty
+mkNodeDiag str = do
+    txt <- drawLatexText str
     -- Draw rectangle around
     -- Default tikz line thickness is 0.4pt (called thin).
     -- Seems like I can't get line thickness small enough in `diagrams`.
@@ -623,7 +629,7 @@ draw2CellAtomDiagrams decorate (DrawableAtom { uatom = MkUAtom celldata _ _, loc
 
 drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
-        render = T.decodeUtf8 . LB.toStrict . toLazyByteString . renderDia PGF with
+        diagToLatex = T.decodeUtf8 . LB.toStrict . toLazyByteString . renderDia PGF with
         baseLength = renderLength2Cell opts
         drawIntermediateCol whichBdy atoms = do
             let lbdy = concatMap (\atom -> map (first (location atom +)) $ whichBdy atom) atoms
@@ -637,13 +643,23 @@ drawLO2CDiagrams opts drawable = let
         rendered :: OnlineTex D2
         rendered = do
             let horizStep = pointToVec (Point baseLength 0)
+            startLabels <- forM (d2CLeftBdy drawable) $ \(dp, d) -> do
+                lbl <- drawLatexText $ T.unpack (render (label1 d))
+                return $ translate (pointToVec dp - horizStep/2) $ alignXMax lbl
             firstCol <- drawIntermediateCol leftBdy (head (d2CAtoms drawable))
-            columns <- forM (zip [0..] $ d2CAtoms drawable) $ \(i, atoms) -> do
-                intermediate <- drawIntermediateCol rightBdy atoms
+            columns <- forM (d2CAtoms drawable) $ \atoms -> do
                 nodes <- forM atoms $ draw2CellAtomDiagrams False
+                intermediate <- drawIntermediateCol rightBdy atoms
                 return $ mconcat nodes <> intermediate
-            return $ translate (-horizStep) firstCol <> mconcat columns
-    in render $ surfOnlineTex with rendered
+            endLabels <- forM (d2CRightBdy drawable) $ \(dp, d) -> do
+                lbl <- drawLatexText $ T.unpack (render (label1 d))
+                return $ translate (pointToVec dp - horizStep/2) $ alignXMin lbl
+            return $
+                mconcat startLabels
+                <> translate (-horizStep) firstCol
+                <> mconcat columns
+                <> mconcat endLabels
+    in diagToLatex $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
