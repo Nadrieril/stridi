@@ -72,6 +72,7 @@ main = do
 
 draw2c :: LaTeXC l => A2Cell -> l
 draw2c = drawA2Cell $ RenderOptions 0.5 0.5
+draw2cSmall = drawA2Cell $ RenderOptions 0.6 0.2
 
 arrowR, arrowL :: [Text]
 arrowR = ["postaction={decorate}","decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90}}}"]
@@ -107,6 +108,7 @@ cofork = new2COptions "" blackdot (a**a) a
 bead = new2COptions "" blackdot a a
 lone = new2COptions "" blackdot id1 id1
 spider = new2COptions "" blackdot (a**a**a**a) (a**a**a)
+f = new2C "f" ar br
 
 body :: LaTeXT IO ()
 body = do
@@ -132,7 +134,8 @@ body = do
     raw "\\\\"
     draw2c spider
     draw2c $ fork * cofork
-    -- raw "\\\\"
+    draw2cSmall $ (f ** id2 bl) * cap bb
+    raw "\\\\"
     -- draw2c $ id2 id1 * lone ** lone * id2 id1
     -- draw2c $ (id2 id1 ** lone) * (lone ** id2 id1)
     -- draw2c $ lone * lone * lone ** lone * lone * lone

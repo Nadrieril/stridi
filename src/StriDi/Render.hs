@@ -648,25 +648,26 @@ drawLO2CDiagrams opts drawable = let
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
                 return $ translate (pointToVec dp) $ alignXMax lbl
             firstCol <- drawIntermediateCol leftBdy (head (d2CAtoms drawable))
-            columns <- forM (d2CAtoms drawable) $ \atoms -> do
-                nodes <- forM atoms $ draw2CellAtomDiagrams False
-                intermediate <- drawIntermediateCol rightBdy atoms
-                return $ mconcat nodes <> intermediate
+            nodes <- forM (concat $ d2CAtoms drawable) $ draw2CellAtomDiagrams False
+            intermediates <- forM (d2CAtoms drawable) $ \atoms -> do
+                drawIntermediateCol rightBdy atoms
             endLabels <- forM (d2CRightBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
                 return $ translate (pointToVec dp) $ alignXMin lbl
             return $
-                mconcat startLabels
-                <> translate (-horizStep) firstCol
-                <> mconcat columns
+                   mconcat nodes
+                <> mconcat startLabels
                 <> mconcat endLabels
+                <> mconcat intermediates
+                <> translate (-horizStep) firstCol
     in diagToLatex $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
-      (\x ->
-         (fromLaTeX . TeXEnv "tikzpicture" [] . raw . drawLO2C opts $ x)
-      -- <> (fromLaTeX . raw . drawLO2CDiagrams opts $ x)
+    fromLaTeX
+    . (\x ->
+         (raw . drawLO2CDiagrams opts $ x)
+      -- <> (TeXEnv "tikzpicture" [] . raw . drawLO2C opts $ x)
       )
     . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
