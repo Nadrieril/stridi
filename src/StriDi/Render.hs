@@ -17,7 +17,7 @@ import Data.Type.Equality
 import Data.Proxy
 import Data.List
 import Data.List.Extra
-import Control.Arrow ((***))
+import Control.Arrow ((***), first)
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
@@ -32,7 +32,7 @@ import Text.LaTeX hiding ((&))
 import Text.LaTeX.Base.Class (comm1, LaTeXC, fromLaTeX)
 import Text.LaTeX.Base.Syntax (LaTeX(..))
 import qualified Diagrams.Prelude as Diag
-import Diagrams.Prelude hiding (Render, trace, defaultBoundary, Point, translate, render, namePoint)
+import Diagrams.Prelude hiding (Render, trace, defaultBoundary, Point, render, namePoint, location)
 import Diagrams.Backend.PGF.CmdLine
 import Diagrams.Backend.PGF.Surface
 import Diagrams.TwoD.Vector         (perp)
@@ -44,7 +44,7 @@ import System.Texrunner.Online (runOnlineTex, runOnlineTex', texPutStrLn)
 import StriDi.TypedSeq
 import StriDi.Cells
 
-type D2 = Diag.Diagram PGF
+type D2 = Diagram PGF
 
 
 traceShowIdLbl lbl x = trace (lbl ++ ": " ++ show x) x
@@ -339,20 +339,18 @@ instance Render Point where
     render = T.pack . show
 
 instance Num Point where
+    fromInteger x = Point (fromInteger x) (fromInteger x)
     (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
     (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
 
 y :: Point -> Rational
 y (Point _ y) = y
 
-translate :: Rational -> Rational -> Point -> Point
-translate dx dy = (Point dx dy +)
-
 translateh :: Rational -> Point -> Point
-translateh dx = translate dx 0
+translateh dx = (Point dx 0 +)
 
 translatev :: Rational -> Point -> Point
-translatev dy = translate 0 dy
+translatev dy = (Point 0 dy +)
 
 scalePoint :: Rational -> Point -> Point
 scalePoint k (Point x y) = Point (k*x) (k*y)
@@ -576,8 +574,8 @@ placeAlongTrail trail param = let
 pointToVec :: Point -> V2 Double
 pointToVec (Point x y) = scale 30 $ r2 (approx x, approx y)
 
-strokeWire :: D1Cell -> Bool -> [Segment Closed V2 Double] -> D2
-strokeWire wire reverse segments = let
+strokeWire :: D1Cell -> Bool -> Bool -> [Segment Closed V2 Double] -> D2
+strokeWire wire decorate reverse segments = let
         trail = trailFromSegments segments `at` origin
         -- Temporary hack
         isArrowR =
@@ -588,22 +586,24 @@ strokeWire wire reverse segments = let
             if isArrowR || isArrowL
             then let
                     needReverse = isArrowL && not reverse || isArrowR && reverse
-                    arrow = scale 4 $
+                    arrow = scale 4 $ translate (r2 (0.354, 0)) $
                             fromOffsets [r2 (1, 0) # rotate (3/8 @@ turn)]
                          <> fromOffsets [r2 (1, 0) # rotate (-3/8 @@ turn)]
                     arrow' = if needReverse then rotate (1/2 @@ turn) arrow else arrow
                  in placeAlongTrail trail 0.5 arrow'
             else mempty
-    in arrow <> stroke trail
+    in if decorate
+        then arrow <> stroke trail
+        else stroke trail
 
-draw2CellAtomDiagrams :: DrawableAtom -> OnlineTex D2
-draw2CellAtomDiagrams (DrawableAtom { uatom = IdUAtom _, location, leftBdy, rightBdy }) = do
+draw2CellAtomDiagrams :: Bool -> DrawableAtom -> OnlineTex D2
+draw2CellAtomDiagrams decorate (DrawableAtom { uatom = IdUAtom _, location, leftBdy, rightBdy }) = do
     wires <- forM (zip leftBdy rightBdy) $ \((dpl, wire), (dpr, _)) -> do
         let pl = pointToVec dpl
         let pr = pointToVec dpr
-        return $ Diag.translate pl $ strokeWire wire False [straight (pr - pl)]
-    return $ Diag.translate (pointToVec location) $ mconcat wires
-draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
+        return $ translate pl $ strokeWire wire decorate False [straight (pr - pl)]
+    return $ translate (pointToVec location) $ mconcat wires
+draw2CellAtomDiagrams decorate (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
     let label = T.unpack $ render $ label2 celldata
     node <- case label of
               _ | "circle" `elem` tikzOptions2 celldata -> return $ circle 1.5 # fc black
@@ -615,20 +615,32 @@ draw2CellAtomDiagrams (DrawableAtom { uatom = MkUAtom celldata _ _, location, le
                 if abs (y dp) <= 0.01
                 then straight d
                 else bézier3 (ctrlpt/2) (d + (ctrlpt - d)/2) d
-        return $ strokeWire wire reverse [segment]
-    return $ Diag.translate (pointToVec location) $ node <> mconcat wires
+        return $ strokeWire wire decorate reverse [segment]
+    return $ translate (pointToVec location) $ node <> mconcat wires
 
 drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
-        render = T.decodeUtf8 . LB.toStrict . toLazyByteString . Diag.renderDia PGF Diag.with
+        render = T.decodeUtf8 . LB.toStrict . toLazyByteString . renderDia PGF with
+        baseLength = renderLength2Cell opts
+        drawIntermediateCol whichBdy atoms = do
+            let lbdy = concatMap (\atom -> map (first (location atom +)) $ whichBdy atom) atoms
+                rbdy = map (first (translateh baseLength)) lbdy
+            draw2CellAtomDiagrams True (DrawableAtom {
+                    uatom = IdUAtom undefined,
+                    location = 0,
+                    leftBdy = lbdy,
+                    rightBdy = rbdy
+                })
         rendered :: OnlineTex D2
         rendered = do
             columns <- forM (d2CAtoms drawable) $ \atoms -> do
+                intermediate <- drawIntermediateCol leftBdy atoms
                 nodes <- forM atoms $ \atom -> do
-                    draw2CellAtomDiagrams atom
-                return $ mconcat nodes
-            return $ foldr ((|||)) mempty columns
-    in render $ surfOnlineTex Diag.with rendered
+                    draw2CellAtomDiagrams False atom
+                return $ intermediate ||| mconcat nodes
+            final <- drawIntermediateCol rightBdy (last (d2CAtoms drawable))
+            return $ foldr ((|||)) mempty columns ||| final
+    in render $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
