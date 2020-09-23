@@ -514,9 +514,9 @@ extractWires drawable = let
     in snd $ fromJust $ evalRWST (processDrawable drawable) () ([], [])
 
 -- Draw the given text
-drawLatexText :: String -> OnlineTex D2
-drawLatexText [] = return mempty
-drawLatexText str = do
+mkLatexText :: String -> OnlineTex D2
+mkLatexText [] = return mempty
+mkLatexText str = do
     -- By default, tikz adds an inner padding of 1/3em to rectangles around text
     -- I measure 1em from the width of an "M"
     -- TODO: measure only once
@@ -532,7 +532,7 @@ drawLatexText str = do
 mkNodeDiag :: String -> OnlineTex D2
 mkNodeDiag [] = return mempty
 mkNodeDiag str = do
-    txt <- drawLatexText str
+    txt <- mkLatexText str
     -- Draw rectangle around
     -- Default tikz line thickness is 0.4pt (called thin).
     -- Seems like I can't get line thickness small enough in `diagrams`.
@@ -584,10 +584,10 @@ liftOnlineTex = lift
 tellDiagram :: D2 -> MonadLatexDiagram ()
 tellDiagram = tell
 
-runMonadLatexDiagram :: MonadLatexDiagram a -> OnlineTex (D2, a)
-runMonadLatexDiagram x = do
-    (a, (), diag) <- runRWST x () ()
-    return (diag, a)
+evalMonadLatexDiagram :: MonadLatexDiagram () -> OnlineTex D2
+evalMonadLatexDiagram x = do
+    ((), (), diag) <- runRWST x () ()
+    return diag
 
 drawHalfWire :: MonadWriter D2 m => D1Cell -> Bool -> Bool -> HalfWire -> m (P2 Double)
 drawHalfWire wire decorate reverse (HWStraight anchor) = return anchor
@@ -600,54 +600,46 @@ drawHalfWire wire decorate reverse (HWCurved origin anchor) = do
     tell $ moveTo origin $ strokeWire wire decorate reverse [segment]
     return $ origin .+^ anchor
 
-drawLaidOutWire :: MonadWriter D2 m => LaidOutWire -> m ()
+drawLaidOutWire :: LaidOutWire -> MonadLatexDiagram ()
 drawLaidOutWire (LaidOutWire { lowData, lowStart, lowEnd }) = do
+    -- Draw the start and end of the wire
     startPoint <- drawHalfWire lowData False False lowStart
     endPoint <- drawHalfWire lowData False True lowEnd
+    -- Draw the straight identity between the two
     tell $ moveTo startPoint $ strokeWire lowData True False [straight (endPoint .-. startPoint)]
 
-draw2CellAtomDiagrams :: Bool -> DrawableAtom -> OnlineTex D2
-draw2CellAtomDiagrams decorate (DrawableAtom { uatom = IdUAtom _ }) = return mempty
-draw2CellAtomDiagrams decorate (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
+draw2CellAtom :: DrawableAtom -> MonadLatexDiagram ()
+draw2CellAtom (DrawableAtom { uatom = IdUAtom _ }) = return ()
+draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
     let label = T.unpack $ render $ label2 celldata
-    translate (pointToVec location) <$> case label of
-          _ | "circle" `elem` tikzOptions2 celldata -> return $ circle 1.5 # fc black
-          _ -> mkNodeDiag label
+    case label of
+        _ | "circle" `elem` tikzOptions2 celldata -> do
+            tellDiagram $ moveTo (pointToPoint location) $ circle 1.5 # fc black
+        _ -> do
+            diag <- liftOnlineTex $ moveTo (pointToPoint location) <$> mkNodeDiag label
+            tellDiagram diag
 
-drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
-drawLO2CDiagrams opts drawable = let
-        diagToLatex = T.decodeUtf8 . LB.toStrict . toLazyByteString . renderDia PGF with
-        baseLength = renderLength2Cell opts
-        rendered :: OnlineTex D2
-        rendered = do
-            let wires = extractWires drawable
-            (wires, ()) <- runMonadLatexDiagram $ forM_ wires drawLaidOutWire
-            startLabels <- forM (d2CLeftBdy drawable) $ \(dp, d) -> do
-                lbl <- drawLatexText $ T.unpack (render (label1 d))
-                return $ translate (pointToVec dp) $ alignXMax lbl
-            endLabels <- forM (d2CRightBdy drawable) $ \(dp, d) -> do
-                lbl <- drawLatexText $ T.unpack (render (label1 d))
-                return $ translate (pointToVec dp) $ alignXMin lbl
-            intermediates <- forM (d2CIntermediates drawable) $ \lbdy -> do
-                let rbdy = map (first (translateh baseLength)) lbdy
-                draw2CellAtomDiagrams True (DrawableAtom {
-                        uatom = IdUAtom undefined,
-                        location = 0,
-                        leftBdy = lbdy,
-                        rightBdy = rbdy
-                    })
-            nodes <- forM (d2CAtoms drawable) $ draw2CellAtomDiagrams False
-            return $
-                   mconcat nodes
-                <> mconcat startLabels
-                <> mconcat endLabels
-                <> mconcat intermediates
-                <> wires
-    in diagToLatex $ surfOnlineTex with rendered
+drawLO2CLatex :: RenderOptions -> Drawable2Cell -> MonadLatexDiagram ()
+drawLO2CLatex opts drawable = do
+    forM_ (d2CAtoms drawable) draw2CellAtom
+    forM_ (d2CLeftBdy drawable) $ \(dp, d) -> do
+        let lbl = T.unpack (render (label1 d))
+        txt <- liftOnlineTex $ mkLatexText lbl
+        tellDiagram $ moveTo (pointToPoint dp) $ alignXMax txt
+    forM_ (d2CRightBdy drawable) $ \(dp, d) -> do
+        let lbl = T.unpack (render (label1 d))
+        txt <- liftOnlineTex $ mkLatexText lbl
+        tellDiagram $ moveTo (pointToPoint dp) $ alignXMin txt
+    forM_ (extractWires drawable) drawLaidOutWire
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
 draw2Cell opts =
-    fromLaTeX . raw . drawLO2CDiagrams opts
+    fromLaTeX . raw
+    . T.decodeUtf8 . LB.toStrict . toLazyByteString
+    . renderDia PGF with
+    . surfOnlineTex with
+    . evalMonadLatexDiagram
+    . drawLO2CLatex opts
     . mkDrawable2Cell (renderLength2Cell opts)
     . flip layOutTwoCell opts
     . twoCellToCanonForm
