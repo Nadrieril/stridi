@@ -7,3 +7,7 @@ packages:
 extra-deps:
   - diagrams-pgf-1.4.1.1
   - texrunner-0.0.1.2
+  - gasp-1.2.0.0
+    # Can't use package from hackage because of https://github.com/jyp/glpk-hs/pull/14
+  - github: Nadrieril/glpk-hs
+    commit: d222be5ae99d1c76a8b41e7575bb772f709cb85d

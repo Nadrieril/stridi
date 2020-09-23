@@ -33,6 +33,7 @@ library
     , diagrams-pgf
     , texrunner
     , bytestring
+    , glpk-hs
   default-language:    Haskell2010
 
 test-suite test
@@ -52,6 +53,7 @@ test-suite test
     , stridi
     , texrunner
     , bytestring
+    , glpk-hs
   other-modules:
       StriDi.DSL
     , StriDi.DSL.Monoidal

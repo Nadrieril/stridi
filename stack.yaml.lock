@@ -18,6 +18,24 @@ packages:
       sha256: 70ef7f2435ae962226d1565a18415f21dd1ae3fc12de6eed91b41bd18428bf8a
   original:
     hackage: texrunner-0.0.1.2
+- completed:
+    hackage: gasp-1.2.0.0@sha256:588f9d470ed8e51ff3819b496d5a5a2f41c55b613fee7f5c59da6271e73ef7d3,697
+    pantry-tree:
+      size: 279
+      sha256: 0979d4c48cbd1dc7969c1b8e17f87529e1f2f490f0da8b3e094b59fd44e97b0e
+  original:
+    hackage: gasp-1.2.0.0
+- completed:
+    size: 17936
+    url: https://github.com/Nadrieril/glpk-hs/archive/d222be5ae99d1c76a8b41e7575bb772f709cb85d.tar.gz
+    name: glpk-hs
+    version: '0.7'
+    sha256: 4a37dd0fc9be392b4fd4c05d72d822d35c6e2c7bf47fcb6faec36c48f7e3f784
+    pantry-tree:
+      size: 1707
+      sha256: 270efb5cbb57edc0dffd09d84f8b81d76845935667f17e426f32f68f80b89d9d
+  original:
+    url: https://github.com/Nadrieril/glpk-hs/archive/d222be5ae99d1c76a8b41e7575bb772f709cb85d.tar.gz
 snapshots:
 - completed:
     size: 523700
