@@ -559,24 +559,22 @@ pointToPoint p = origin .+^ pointToVec p
 strokeWire :: D1Cell -> Bool -> Bool -> [Segment Closed V2 Double] -> D2
 strokeWire wire decorate reverse segments = let
         trail = trailFromSegments segments `at` origin
+        trail' = if reverse then reverseLocTrail trail else trail
         -- Temporary hack
         isArrowR =
             "decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90}}}" `elem` tikzDecorations1 wire
         isArrowL =
             "decoration={markings, mark=at position 0.5 with {\\arrow[line width=0.2mm]{angle 90 reversed}}}" `elem` tikzDecorations1 wire
-        arrow =
-            if isArrowR || isArrowL
+        decoration =
+            if decorate && (isArrowR || isArrowL)
             then let
-                    needReverse = isArrowL && not reverse || isArrowR && reverse
                     arrow = scale 4 $ translate (r2 (0.354, 0)) $
                             fromOffsets [r2 (1, 0) # rotate (3/8 @@ turn)]
                          <> fromOffsets [r2 (1, 0) # rotate (-3/8 @@ turn)]
-                    arrow' = if needReverse then rotate (1/2 @@ turn) arrow else arrow
-                 in placeAlongTrail trail 0.5 arrow'
+                    arrow' = if isArrowL then rotate (1/2 @@ turn) arrow else arrow
+                 in placeAlongTrail trail' 0.5 arrow'
             else mempty
-    in if decorate
-        then arrow <> stroke trail
-        else stroke trail
+    in decoration <> stroke trail'
 
 type MonadLatexDiagram = RWST () D2 () OnlineTex
 
