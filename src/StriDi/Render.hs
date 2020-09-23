@@ -48,6 +48,15 @@ import StriDi.Cells
 
 type D2 = Diagram PGF
 
+type Point = P2 Double
+type Vec = V2 Double
+
+mkdx :: Double -> Vec
+mkdx dx = 0 & _x .~ dx
+
+mkdy :: Double -> Vec
+mkdy dy = 0 & _y .~ dy
+
 
 traceShowIdLbl lbl x = trace (lbl ++ ": " ++ show x) x
 
@@ -149,13 +158,18 @@ data RenderOptions = RenderOptions {
 defaultRenderOpts = RenderOptions 1 1
 largeRenderOpts = RenderOptions 2 1
 
+-- This for compatibility with old tikz-based renderer
+-- TODO: temporary hack
+renderScale :: Double
+renderScale = 30
+
 type MonadLayout2Cell = MonadReader RenderOptions
 
 askBaseWidth :: MonadReader RenderOptions m => m Double
-askBaseWidth = renderWidth2Cell <$> ask
+askBaseWidth = (renderScale*) . renderWidth2Cell <$> ask
 
 askBaseLength :: MonadReader RenderOptions m => m Double
-askBaseLength = renderLength2Cell <$> ask
+askBaseLength = (renderScale*) . renderLength2Cell <$> ask
 
 
 
@@ -168,6 +182,9 @@ instance Show (TwoCellBoundary f) where
     show (Bdy f bdy) =
         "TwoCellBoundary (" ++ show1CellLabel f ++ ") "
         ++ "[" ++ intercalate ", " (show <$> bdy) ++ "]"
+
+mapBoundary :: ([Double] -> [Double]) -> TwoCellBoundary f -> TwoCellBoundary f
+mapBoundary g (Bdy f bdy) = Bdy f (g bdy)
 
 defaultBoundary :: MonadLayout2Cell m => V1Cell f -> m (TwoCellBoundary f)
 defaultBoundary f = do
@@ -329,67 +346,37 @@ layOutTwoCell :: MonadLayout2Cell m => TwoCellCanonForm f g -> m (LayedOut2Cell 
 layOutTwoCell c = propagateDeltasLO2C <$> partiallyLayOutTwoCell c
 
 
-
-data Point = Point Double Double
-
-instance Show Point where
-    show (Point x y) = "(" ++ show x ++ "," ++ show y ++ ")"
-instance Render Point where
-    render = T.pack . show
-
-instance Num Point where
-    fromInteger x = Point (fromInteger x) (fromInteger x)
-    (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
-    (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
-
-y :: Point -> Double
-y (Point _ y) = y
-
-translateh :: Double -> Point -> Point
-translateh dx = (Point dx 0 +)
-
-translatev :: Double -> Point -> Point
-translatev dy = (Point 0 dy +)
-
-scalePoint :: Double -> Point -> Point
-scalePoint k (Point x y) = Point (k*x) (k*y)
-
-midPoint :: Point -> Point -> Point
-midPoint p1 p2 = scalePoint (1/2) $ p1 + p2
-
-
 pointsFromBdy :: TwoCellBoundary f -> Point -> [(Point, D1Cell)]
-pointsFromBdy (Bdy f bdy) p0 =
-    [ (p, d)
-    | d <- list1Cells f
-    | p <- init $ tail $ scanl (flip translatev) p0 bdy ]
+pointsFromBdy (Bdy f bdy) p =
+    zip
+        (init $ tail $ scanl (.+^) p $ map mkdy bdy)
+        (list1Cells f)
 
 data DrawableAtom = DrawableAtom {
     uatom :: TwoCellUAtom,
     location :: Point,
-    leftBdy :: [(Point, D1Cell)],
-    rightBdy :: [(Point, D1Cell)]
+    leftBdy :: [(Vec, D1Cell)],
+    rightBdy :: [(Vec, D1Cell)]
 }
 
 mkDrawableAtom :: Double -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> DrawableAtom
 mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
-    let deltaFromBorder = Point (baseLength / 2) 0
+    -- TODO: I use th ehorizontal baseLength but I should use the vertical one
+    let deltaFromBorder = mkdx (baseLength / 2)
         inputs = length1 f
         outputs = length1 g
-        midpt = case () of
+        location = case () of
             _ | inputs == 0 && outputs == 0 ->
-                translatev ((head unbdyl) / 2) pl
+                pl .+^ deltaFromBorder
+                   .+^ mkdy (head unbdyl / 2)
             _ | inputs == 0 ->
-                midPoint
-                    (translatev (head unbdyr) pr)
-                    (translatev (sum $ init unbdyr) pr)
+                pr .-^ deltaFromBorder
+                   .+^ mkdy ((head unbdyr + (sum $ init unbdyr)) / 2)
             _  ->
-                midPoint
-                    (translatev (head unbdyl) pl)
-                    (translatev (sum $ init unbdyl) pl)
-        location = midpt + deltaFromBorder
-        leftBdy = pointsFromBdy bdyl (pl - midpt - deltaFromBorder)
-        rightBdy = pointsFromBdy bdyr (pr - midpt + deltaFromBorder)
+                pl .+^ deltaFromBorder
+                   .+^ mkdy ((head unbdyl + (sum $ init unbdyl)) / 2)
+        leftBdy = map (first (.-. location)) $ pointsFromBdy bdyl pl
+        rightBdy = map (first (.-. location)) $ pointsFromBdy bdyr pr
      in DrawableAtom { uatom = untypeAtom atom, location, leftBdy, rightBdy }
 
 mkDrawableAtoms :: Double -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [DrawableAtom]
@@ -400,8 +387,8 @@ mkDrawableAtoms baseLength pl pr bdyf bdyg (ConsSlice atom q) = let
         drawableAtom = mkDrawableAtom baseLength pl pr bdySrcAtom bdyTgtAtom atom
         rest = mkDrawableAtoms
                 baseLength
-                (translatev (sum $ midSrc : unBdy bdySrcAtom) pl)
-                (translatev (sum $ midTgt : unBdy bdyTgtAtom) pr)
+                (pl .+^ mkdy (sum $ midSrc : unBdy bdySrcAtom))
+                (pr .+^ mkdy (sum $ midTgt : unBdy bdyTgtAtom))
                 bdySrcQ bdyTgtQ q
     in drawableAtom : rest
 
@@ -416,18 +403,18 @@ mkDrawable2Cell :: Double -> LayedOut2Cell f g -> Drawable2Cell
 mkDrawable2Cell baseLength c = let
         (p, columns) =
             second reverse $
-            foldlInterleaved c (Point baseLength 0, []) $ \(bdyl, slice, bdyr) (p, columns) ->
-                let column = mkDrawableAtoms baseLength p p bdyl bdyr slice
-                 in (translateh (2*baseLength) p, column:columns)
-        d2CLeftBdy = pointsFromBdy (headInterleaved c) (Point 0 0)
+            foldlInterleaved c (origin .+^ mkdx baseLength, []) $ \(bdyl, slice, bdyr) (p, columns) ->
+                let column = mkDrawableAtoms baseLength p (p .+^ mkdx baseLength) bdyl bdyr slice
+                 in (p .+^ mkdx (2*baseLength), column:columns)
+        d2CLeftBdy = pointsFromBdy (headInterleaved c) 0
         d2CRightBdy = pointsFromBdy (lastInterleaved c) p
         d2CAtoms = concat columns
         d2CColumns = columns
     in Drawable2Cell { d2CAtoms, d2CColumns, d2CLeftBdy, d2CRightBdy }
 
 data HalfWire =
-    HWStraight { hwStraightAnchor :: P2 Double }
-    | HWCurved { hwCurvedOrigin :: P2 Double, hwCurvedAnchor :: V2 Double }
+    HWStraight { hwAnchor :: Point }
+    | HWCurved { hwAnchor :: Point, hwCurvedOrigin :: Point }
     deriving (Show)
 
 data LaidOutWire = LaidOutWire {
@@ -479,8 +466,8 @@ extractWires drawable = let
             forM_ leftBdy $ \_ -> forwardWire
         processNode (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
             let mkCurved dp = HWCurved {
-                    hwCurvedOrigin = pointToPoint location,
-                    hwCurvedAnchor = pointToVec dp
+                    hwAnchor = location .+^ dp,
+                    hwCurvedOrigin = location
                 }
             -- A bunch of incoming halfwires end here
             forM_ leftBdy $ \(dp, wire) -> do
@@ -491,8 +478,8 @@ extractWires drawable = let
         processDrawable :: MonadExtractWires m => Drawable2Cell -> m ()
         processDrawable drawable = do
             -- First column
-            forM_ (d2CLeftBdy drawable) $ \(dp, _) -> do
-                startWire $ HWStraight (pointToPoint dp)
+            forM_ (d2CLeftBdy drawable) $ \(p, _) -> do
+                startWire $ HWStraight p
 
             -- Columns with nodes
             forM_ (d2CColumns drawable) $ \nodes -> do
@@ -501,8 +488,8 @@ extractWires drawable = let
 
             nextColumn
             -- Last column
-            forM_ (d2CRightBdy drawable) $ \(dp, wire) -> do
-                endWire wire $ HWStraight (pointToPoint dp)
+            forM_ (d2CRightBdy drawable) $ \(p, wire) -> do
+                endWire wire $ HWStraight p
 
     in snd $ fromJust $ evalRWST (processDrawable drawable) () ([], [])
 
@@ -543,12 +530,6 @@ placeAlongTrail trail param = let
         tangent = trail `tangentAtParam` param
     in moveTo point . rotateTo (direction tangent)
 
-pointToVec :: Point -> V2 Double
-pointToVec (Point x y) = scale 30 $ r2 (x, y)
-
-pointToPoint :: Point -> P2 Double
-pointToPoint p = origin .+^ pointToVec p
-
 strokeWire :: D1Cell -> Bool -> Bool -> [Segment Closed V2 Double] -> D2
 strokeWire wire decorate reverse segments = let
         trail = trailFromSegments segments `at` origin
@@ -582,22 +563,23 @@ evalMonadLatexDiagram x = do
     ((), (), diag) <- runRWST x () ()
     return diag
 
-drawHalfWire :: MonadWriter D2 m => D1Cell -> Bool -> Bool -> HalfWire -> m (P2 Double)
-drawHalfWire wire decorate reverse (HWStraight anchor) = return anchor
-drawHalfWire wire decorate reverse (HWCurved origin anchor) = do
-    let ctrlpt = anchor & _x .~ 0
+drawHalfWire :: MonadWriter D2 m => D1Cell -> Bool -> Bool -> HalfWire -> m Point
+drawHalfWire wire _ _ (HWStraight anchor) = return anchor
+drawHalfWire wire decorate isStart (HWCurved anchor curveFrom) = do
+    let delta = curveFrom .-. anchor
+    let ctrl = delta & _y .~ 0
         segment =
-            if abs (view _y anchor) <= 0.01
-            then straight anchor
-            else bézier3 (ctrlpt/2) (anchor + (ctrlpt - anchor)/2) anchor
-    tell $ moveTo origin $ strokeWire wire decorate reverse [segment]
-    return $ origin .+^ anchor
+            if abs (view _y delta) <= 0.01
+            then straight delta
+            else bézier3 (ctrl/2) (delta + (ctrl - delta)/2) delta
+    tell $ moveTo anchor $ strokeWire wire decorate isStart [segment]
+    return anchor
 
 drawLaidOutWire :: LaidOutWire -> MonadLatexDiagram ()
 drawLaidOutWire (LaidOutWire { lowData, lowStart, lowEnd }) = do
     -- Draw the start and end of the wire
-    startPoint <- drawHalfWire lowData False False lowStart
-    endPoint <- drawHalfWire lowData False True lowEnd
+    startPoint <- drawHalfWire lowData False True lowStart
+    endPoint <- drawHalfWire lowData False False lowEnd
     -- Draw the straight identity between the two
     tell $ moveTo startPoint $ strokeWire lowData True False [straight (endPoint .-. startPoint)]
 
@@ -607,22 +589,22 @@ draw2CellAtom (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, r
     let label = T.unpack $ render $ label2 celldata
     case label of
         _ | "circle" `elem` tikzOptions2 celldata -> do
-            tellDiagram $ moveTo (pointToPoint location) $ circle 1.5 # fc black
+            tellDiagram $ moveTo location $ circle 1.5 # fc black
         _ -> do
-            diag <- liftOnlineTex $ moveTo (pointToPoint location) <$> mkNodeDiag label
+            diag <- liftOnlineTex $ moveTo location <$> mkNodeDiag label
             tellDiagram diag
 
 drawLO2CLatex :: RenderOptions -> Drawable2Cell -> MonadLatexDiagram ()
 drawLO2CLatex opts drawable = do
     forM_ (d2CAtoms drawable) draw2CellAtom
-    forM_ (d2CLeftBdy drawable) $ \(dp, d) -> do
-        let lbl = T.unpack (render (label1 d))
+    forM_ (d2CLeftBdy drawable) $ \(p, wire) -> do
+        let lbl = T.unpack (render (label1 wire))
         txt <- liftOnlineTex $ mkLatexText lbl
-        tellDiagram $ moveTo (pointToPoint dp) $ alignXMax txt
-    forM_ (d2CRightBdy drawable) $ \(dp, d) -> do
-        let lbl = T.unpack (render (label1 d))
+        tellDiagram $ moveTo p $ alignXMax txt
+    forM_ (d2CRightBdy drawable) $ \(p, wire) -> do
+        let lbl = T.unpack (render (label1 wire))
         txt <- liftOnlineTex $ mkLatexText lbl
-        tellDiagram $ moveTo (pointToPoint dp) $ alignXMin txt
+        tellDiagram $ moveTo p $ alignXMin txt
     forM_ (extractWires drawable) drawLaidOutWire
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
@@ -633,7 +615,7 @@ draw2Cell opts =
     . surfOnlineTex with
     . evalMonadLatexDiagram
     . drawLO2CLatex opts
-    . mkDrawable2Cell (renderLength2Cell opts)
+    . mkDrawable2Cell (renderScale * renderLength2Cell opts)
     . flip layOutTwoCell opts
     . twoCellToCanonForm
 
