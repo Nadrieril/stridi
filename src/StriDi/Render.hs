@@ -408,7 +408,6 @@ mkDrawableAtoms baseLength pl pr bdyf bdyg (ConsSlice atom q) = let
 data Drawable2Cell = Drawable2Cell {
     d2CAtoms :: [DrawableAtom],
     d2CColumns :: [[DrawableAtom]],
-    d2CIntermediates :: [[(Point, D1Cell)]],
     d2CLeftBdy :: [(Point, D1Cell)],
     d2CRightBdy :: [(Point, D1Cell)]
 }
@@ -424,10 +423,7 @@ mkDrawable2Cell baseLength c = let
         d2CRightBdy = pointsFromBdy (lastInterleaved c) p
         d2CAtoms = concat columns
         d2CColumns = columns
-        d2CIntermediates =
-            (concatMap (\atom -> map (first (location atom +)) $ map (first (translateh (-baseLength))) $ leftBdy atom) (head columns))
-            : map (concatMap (\atom -> map (first (location atom +)) $ rightBdy atom)) columns
-    in Drawable2Cell { d2CAtoms, d2CColumns, d2CIntermediates, d2CLeftBdy, d2CRightBdy }
+    in Drawable2Cell { d2CAtoms, d2CColumns, d2CLeftBdy, d2CRightBdy }
 
 data HalfWire =
     HWStraight { hwStraightAnchor :: P2 Double }
