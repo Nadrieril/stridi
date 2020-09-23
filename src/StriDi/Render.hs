@@ -407,21 +407,28 @@ mkDrawableAtoms baseLength pl pr bdyf bdyg (ConsSlice atom q) = let
     in drawableAtom : rest
 
 data Drawable2Cell = Drawable2Cell {
-    d2CAtoms :: [[DrawableAtom]],
+    d2CAtoms :: [DrawableAtom],
+    d2CColumns :: [[DrawableAtom]],
+    d2CIntermediates :: [[(Point, D1Cell)]],
     d2CLeftBdy :: [(Point, D1Cell)],
     d2CRightBdy :: [(Point, D1Cell)]
 }
 
 mkDrawable2Cell :: Rational -> LayedOut2Cell f g -> Drawable2Cell
 mkDrawable2Cell baseLength c = let
-        (p, d2CAtoms) =
-            second reverse $ -- Note to self: this is very fun to comment out with the old tikz renderer. It gets very wobbly.
+        (p, columns) =
+            second reverse $
             foldlInterleaved c (Point baseLength 0, []) $ \(bdyl, slice, bdyr) (p, columns) ->
                 let column = mkDrawableAtoms baseLength p p bdyl bdyr slice
                  in (translateh (2*baseLength) p, column:columns)
         d2CLeftBdy = pointsFromBdy (headInterleaved c) (Point 0 0)
         d2CRightBdy = pointsFromBdy (lastInterleaved c) p
-    in Drawable2Cell { d2CAtoms, d2CLeftBdy, d2CRightBdy }
+        d2CAtoms = concat columns
+        d2CColumns = columns
+        d2CIntermediates =
+            (concatMap (\atom -> map (first (location atom +)) $ map (first (translateh (-baseLength))) $ leftBdy atom) (head columns))
+            : map (concatMap (\atom -> map (first (location atom +)) $ rightBdy atom)) columns
+    in Drawable2Cell { d2CAtoms, d2CColumns, d2CIntermediates, d2CLeftBdy, d2CRightBdy }
 
 -- Draw the given text
 drawLatexText :: String -> OnlineTex D2
@@ -511,34 +518,28 @@ drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
         diagToLatex = T.decodeUtf8 . LB.toStrict . toLazyByteString . renderDia PGF with
         baseLength = renderLength2Cell opts
-        drawIntermediateCol whichBdy atoms = do
-            let lbdy = concatMap (\atom -> map (first (location atom +)) $ whichBdy atom) atoms
-                rbdy = map (first (translateh baseLength)) lbdy
-            draw2CellAtomDiagrams True (DrawableAtom {
-                    uatom = IdUAtom undefined,
-                    location = 0,
-                    leftBdy = lbdy,
-                    rightBdy = rbdy
-                })
         rendered :: OnlineTex D2
         rendered = do
-            let horizStep = pointToVec (Point baseLength 0)
             startLabels <- forM (d2CLeftBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
                 return $ translate (pointToVec dp) $ alignXMax lbl
-            firstCol <- drawIntermediateCol leftBdy (head (d2CAtoms drawable))
-            nodes <- forM (concat $ d2CAtoms drawable) $ draw2CellAtomDiagrams False
-            intermediates <- forM (d2CAtoms drawable) $ \atoms -> do
-                drawIntermediateCol rightBdy atoms
             endLabels <- forM (d2CRightBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
                 return $ translate (pointToVec dp) $ alignXMin lbl
+            intermediates <- forM (d2CIntermediates drawable) $ \lbdy -> do
+                let rbdy = map (first (translateh baseLength)) lbdy
+                draw2CellAtomDiagrams True (DrawableAtom {
+                        uatom = IdUAtom undefined,
+                        location = 0,
+                        leftBdy = lbdy,
+                        rightBdy = rbdy
+                    })
+            nodes <- forM (d2CAtoms drawable) $ draw2CellAtomDiagrams False
             return $
                    mconcat nodes
                 <> mconcat startLabels
                 <> mconcat endLabels
                 <> mconcat intermediates
-                <> translate (-horizStep) firstCol
     in diagToLatex $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l

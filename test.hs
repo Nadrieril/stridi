@@ -139,10 +139,10 @@ body = do
     -- draw2c $ lone * lone * lone ** lone * lone * lone
     -- draw2c $ id2 a ** lone ** id2 a
     -- raw "\\\\"
-    -- draw2c $ fork ** cofork
-    -- draw2c $ (id2 a ** cofork) * (fork ** id2 a)
-    -- draw2c $ (fork ** id2 a ** id2 a) * (id2 a ** id2 a ** cofork)
-    -- raw "\\\\"
+    draw2c $ fork ** cofork
+    draw2c $ (id2 a ** cofork) * (fork ** id2 a)
+    draw2c $ (fork ** id2 a ** id2 a) * (id2 a ** id2 a ** cofork)
+    raw "\\\\"
     -- draw2c $ (fork ** id2 a) * (id2 a ** cofork)
     -- draw2c $ cofork ** fork
     -- draw2c $ (cofork ** id2 a) * (id2 a ** fork)
