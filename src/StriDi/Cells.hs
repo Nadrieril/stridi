@@ -160,6 +160,9 @@ mkA0 s = A0Cell $ V0Cell s
 mkA1 :: D1Cell -> A0Cell -> A0Cell -> A1Cell
 mkA1 d (A0Cell a) (A0Cell b) = A1Cell $ V1Atom d a b
 
+lengthA1 :: A1Cell -> Int
+lengthA1 (A1Cell c) = length1 c
+
 idA1 :: A0Cell -> A1Cell
 idA1 (A0Cell a) = A1Cell $ V1Id a
 
@@ -208,9 +211,6 @@ tensorA2 (A2Cell c1) (A2Cell c2) =
     case testEquality (tgt1 $ src2 c1) (src1 $ src2 c2) of
         Just Refl -> A2Cell (c1 `V2Tensor` c2)
         Nothing -> error "Type error in tensorA2"
-
-lengthA1 :: A1Cell -> Int
-lengthA1 (A1Cell c) = length1 c
 
 show1CellLabel :: V1Cell f -> String
 show1CellLabel c = intercalate (" . ") $ fmap (show . label1) $ list1Cells c

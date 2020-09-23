@@ -17,10 +17,12 @@ import Data.Type.Equality
 import Data.Proxy
 import Data.List
 import Data.List.Extra
+import Data.Maybe (fromJust)
 import Control.Arrow ((***), first, second)
 import Control.Monad.State.Strict
 import Control.Monad.Writer.Class
 import Control.Monad.RWS.Strict
+import Control.Monad.Fail
 import Control.Exception.Base (assert)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -430,6 +432,87 @@ mkDrawable2Cell baseLength c = let
             : map (concatMap (\atom -> map (first (location atom +)) $ rightBdy atom)) columns
     in Drawable2Cell { d2CAtoms, d2CColumns, d2CIntermediates, d2CLeftBdy, d2CRightBdy }
 
+data HalfWire =
+    HWStraight { hwStraightAnchor :: P2 Double }
+    | HWCurved { hwCurvedOrigin :: P2 Double, hwCurvedAnchor :: V2 Double }
+    deriving (Show)
+
+data LaidOutWire = LaidOutWire {
+    lowData :: D1Cell,
+    lowStart :: HalfWire,
+    lowEnd :: HalfWire
+} deriving (Show)
+
+type HalfWires = [HalfWire]
+type MonadExtractWires m =
+    ( MonadState (HalfWires, HalfWires) m
+    , MonadWriter [LaidOutWire] m
+    , MonadFail m
+    )
+
+extractWires :: Drawable2Cell -> [LaidOutWire]
+extractWires drawable = let
+        -- We go column by column and keep a running list of wires that are alive so far.
+        -- In the left stack we keep incoming halfwires for this column; in the right stack
+        -- we keep (in reverse order) outgoing halfwires for this column.
+        popl :: MonadExtractWires m => m HalfWire
+        popl = do
+            -- This pattern should not fail if typechecking is correct
+            (x:q, right) <- get
+            put (q, right)
+            return x
+        pushr :: MonadExtractWires m => HalfWire -> m ()
+        pushr x = modify $ second (x:)
+        telllow :: MonadExtractWires m => LaidOutWire -> m ()
+        telllow = tell . (:[])
+
+        startWire :: MonadExtractWires m => HalfWire -> m ()
+        startWire = pushr
+        forwardWire :: MonadExtractWires m => m ()
+        forwardWire = popl >>= pushr
+        endWire :: MonadExtractWires m => D1Cell -> HalfWire -> m ()
+        endWire lowData lowEnd = do
+            lowStart <- popl
+            telllow $ LaidOutWire { lowData, lowStart, lowEnd }
+        nextColumn :: MonadExtractWires m => m ()
+        nextColumn = do
+            -- This pattern should not fail if typechecking is correct
+            ([], halfwires) <- get
+            put (reverse halfwires, [])
+
+        processNode :: MonadExtractWires m => DrawableAtom -> m ()
+        processNode (DrawableAtom { uatom = IdUAtom _, leftBdy }) = do
+            -- Keep existing halfwires
+            forM_ leftBdy $ \_ -> forwardWire
+        processNode (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
+            let mkCurved dp = HWCurved {
+                    hwCurvedOrigin = pointToPoint location,
+                    hwCurvedAnchor = pointToVec dp
+                }
+            -- A bunch of incoming halfwires end here
+            forM_ leftBdy $ \(dp, wire) -> do
+                endWire wire $ mkCurved dp
+            -- A bunch of outgoing outwires start here
+            forM_ rightBdy $ \(dp, _) -> do
+                startWire $ mkCurved dp
+        processDrawable :: MonadExtractWires m => Drawable2Cell -> m ()
+        processDrawable drawable = do
+            -- First column
+            forM_ (d2CLeftBdy drawable) $ \(dp, _) -> do
+                startWire $ HWStraight (pointToPoint dp)
+
+            -- Columns with nodes
+            forM_ (d2CColumns drawable) $ \nodes -> do
+                nextColumn
+                forM_ nodes processNode
+
+            nextColumn
+            -- Last column
+            forM_ (d2CRightBdy drawable) $ \(dp, wire) -> do
+                endWire wire $ HWStraight (pointToPoint dp)
+
+    in snd $ fromJust $ evalRWST (processDrawable drawable) () ([], [])
+
 -- Draw the given text
 drawLatexText :: String -> OnlineTex D2
 drawLatexText [] = return mempty
@@ -470,6 +553,9 @@ placeAlongTrail trail param = let
 pointToVec :: Point -> V2 Double
 pointToVec (Point x y) = scale 30 $ r2 (approx x, approx y)
 
+pointToPoint :: Point -> P2 Double
+pointToPoint p = origin .+^ pointToVec p
+
 strokeWire :: D1Cell -> Bool -> Bool -> [Segment Closed V2 Double] -> D2
 strokeWire wire decorate reverse segments = let
         trail = trailFromSegments segments `at` origin
@@ -492,27 +578,43 @@ strokeWire wire decorate reverse segments = let
         then arrow <> stroke trail
         else stroke trail
 
+type MonadLatexDiagram = RWST () D2 () OnlineTex
+
+liftOnlineTex :: OnlineTex a -> MonadLatexDiagram a
+liftOnlineTex = lift
+
+tellDiagram :: D2 -> MonadLatexDiagram ()
+tellDiagram = tell
+
+runMonadLatexDiagram :: MonadLatexDiagram a -> OnlineTex (D2, a)
+runMonadLatexDiagram x = do
+    (a, (), diag) <- runRWST x () ()
+    return (diag, a)
+
+drawHalfWire :: MonadWriter D2 m => D1Cell -> Bool -> Bool -> HalfWire -> m (P2 Double)
+drawHalfWire wire decorate reverse (HWStraight anchor) = return anchor
+drawHalfWire wire decorate reverse (HWCurved origin anchor) = do
+    let ctrlpt = anchor & _x .~ 0
+        segment =
+            if abs (view _y anchor) <= 0.01
+            then straight anchor
+            else bézier3 (ctrlpt/2) (anchor + (ctrlpt - anchor)/2) anchor
+    tell $ moveTo origin $ strokeWire wire decorate reverse [segment]
+    return $ origin .+^ anchor
+
+drawLaidOutWire :: MonadWriter D2 m => LaidOutWire -> m ()
+drawLaidOutWire (LaidOutWire { lowData, lowStart, lowEnd }) = do
+    startPoint <- drawHalfWire lowData False False lowStart
+    endPoint <- drawHalfWire lowData False True lowEnd
+    tell $ moveTo startPoint $ strokeWire lowData True False [straight (endPoint .-. startPoint)]
+
 draw2CellAtomDiagrams :: Bool -> DrawableAtom -> OnlineTex D2
-draw2CellAtomDiagrams decorate (DrawableAtom { uatom = IdUAtom _, location, leftBdy, rightBdy }) = do
-    wires <- forM (zip leftBdy rightBdy) $ \((dpl, wire), (dpr, _)) -> do
-        let pl = pointToVec dpl
-        let pr = pointToVec dpr
-        return $ translate pl $ strokeWire wire decorate False [straight (pr - pl)]
-    return $ translate (pointToVec location) $ mconcat wires
+draw2CellAtomDiagrams decorate (DrawableAtom { uatom = IdUAtom _ }) = return mempty
 draw2CellAtomDiagrams decorate (DrawableAtom { uatom = MkUAtom celldata _ _, location, leftBdy, rightBdy }) = do
     let label = T.unpack $ render $ label2 celldata
-    node <- case label of
-              _ | "circle" `elem` tikzOptions2 celldata -> return $ circle 1.5 # fc black
-              _ -> mkNodeDiag label
-    wires <- forM (map (True,) leftBdy ++ map (False,) rightBdy) $ \(reverse, (dp, wire)) -> do
-        let d = pointToVec dp
-        let ctrlpt = d & _x .~ 0
-        let segment =
-                if abs (y dp) <= 0.01
-                then straight d
-                else bézier3 (ctrlpt/2) (d + (ctrlpt - d)/2) d
-        return $ strokeWire wire decorate reverse [segment]
-    return $ translate (pointToVec location) $ node <> mconcat wires
+    translate (pointToVec location) <$> case label of
+          _ | "circle" `elem` tikzOptions2 celldata -> return $ circle 1.5 # fc black
+          _ -> mkNodeDiag label
 
 drawLO2CDiagrams :: RenderOptions -> Drawable2Cell -> Text
 drawLO2CDiagrams opts drawable = let
@@ -520,6 +622,8 @@ drawLO2CDiagrams opts drawable = let
         baseLength = renderLength2Cell opts
         rendered :: OnlineTex D2
         rendered = do
+            let wires = extractWires drawable
+            (wires, ()) <- runMonadLatexDiagram $ forM_ wires drawLaidOutWire
             startLabels <- forM (d2CLeftBdy drawable) $ \(dp, d) -> do
                 lbl <- drawLatexText $ T.unpack (render (label1 d))
                 return $ translate (pointToVec dp) $ alignXMax lbl
@@ -540,6 +644,7 @@ drawLO2CDiagrams opts drawable = let
                 <> mconcat startLabels
                 <> mconcat endLabels
                 <> mconcat intermediates
+                <> wires
     in diagToLatex $ surfOnlineTex with rendered
 
 draw2Cell :: LaTeXC l => RenderOptions -> (f :--> g) -> l
