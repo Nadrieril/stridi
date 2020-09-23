@@ -51,9 +51,6 @@ type D2 = Diagram PGF
 
 traceShowIdLbl lbl x = trace (lbl ++ ": " ++ show x) x
 
-approx :: Rational -> Double
-approx x = realToFrac (round (100 * realToFrac x)) / 100
-
 
 data TwoCellAtom (f :: a :-> b) (g :: a :-> b) where
     IdAtom :: V1Cell f -> TwoCellAtom f f
@@ -145,8 +142,8 @@ twoCellToCanonForm (V2Tensor c1 c2) = twoCellToCanonForm c1 `tensorCanonForm` tw
 
 
 data RenderOptions = RenderOptions {
-    renderWidth2Cell :: Rational,
-    renderLength2Cell :: Rational
+    renderWidth2Cell :: Double,
+    renderLength2Cell :: Double
 }
 
 defaultRenderOpts = RenderOptions 1 1
@@ -154,23 +151,23 @@ largeRenderOpts = RenderOptions 2 1
 
 type MonadLayout2Cell = MonadReader RenderOptions
 
-askBaseWidth :: MonadReader RenderOptions m => m Rational
+askBaseWidth :: MonadReader RenderOptions m => m Double
 askBaseWidth = renderWidth2Cell <$> ask
 
-askBaseLength :: MonadReader RenderOptions m => m Rational
+askBaseLength :: MonadReader RenderOptions m => m Double
 askBaseLength = renderLength2Cell <$> ask
 
 
 
 data TwoCellBoundary f = Bdy {
     repBdy :: V1Cell f,
-    unBdy :: [Rational]
+    unBdy :: [Double]
 }
 
 instance Show (TwoCellBoundary f) where
     show (Bdy f bdy) =
         "TwoCellBoundary (" ++ show1CellLabel f ++ ") "
-        ++ "[" ++ intercalate ", " (show . approx <$> bdy) ++ "]"
+        ++ "[" ++ intercalate ", " (show <$> bdy) ++ "]"
 
 defaultBoundary :: MonadLayout2Cell m => V1Cell f -> m (TwoCellBoundary f)
 defaultBoundary f = do
@@ -179,7 +176,7 @@ defaultBoundary f = do
         then [0]
         else [0] ++ replicate (length1 f - 1) baseWidth ++ [0]
 
-splitBoundary' :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Rational, TwoCellBoundary g)
+splitBoundary' :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Double, TwoCellBoundary g)
 splitBoundary' f g (Bdy _ l) = let
         n = length1 f
         before = take n l
@@ -189,7 +186,7 @@ splitBoundary' f g (Bdy _ l) = let
        , mid
        , Bdy g ([0] ++ after))
 
-splitBoundary :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Rational, TwoCellBoundary g)
+splitBoundary :: V1Cell f -> V1Cell g -> TwoCellBoundary (f `K1Cmp` g) -> (TwoCellBoundary f, Double, TwoCellBoundary g)
 splitBoundary f g (Bdy _ l) = let
         n = length1 f
         before = take n l
@@ -202,14 +199,14 @@ splitBoundary f g (Bdy _ l) = let
 
 data TwoCellBdyDelta f = BdyDelta {
     repDelta :: V1Cell f,
-    unDelta :: [(Int, Rational)]
+    unDelta :: [(Int, Double)]
 }
-type BdyDelta f = (Int, Rational)
+type BdyDelta f = (Int, Double)
 
 instance Show (TwoCellBdyDelta f) where
     show (BdyDelta f delta) =
         "TwoCellBdyDelta (" ++ show1CellLabel f ++ ") "
-        ++ "[" ++ intercalate ", " (show . (fmap approx) <$> delta) ++ "]"
+        ++ "[" ++ intercalate ", " (show <$> delta) ++ "]"
 
 nilDelta :: V1Cell f -> TwoCellBdyDelta f
 nilDelta f = BdyDelta f []
@@ -262,7 +259,7 @@ propagateDeltasSlice (ConsSlice atom q) = mapDeltas (srcAtom atom) (srcSlice q) 
 
 mergeBD :: MonadLayout2Cell m =>
     (TwoCellBoundary f, TwoCellBdyDelta h) ->
-    Rational ->
+    Double ->
     (TwoCellBoundary g, TwoCellBdyDelta i) ->
     m (TwoCellBoundary (f `K1Cmp` g), TwoCellBdyDelta (h `K1Cmp` i))
 mergeBD ((Bdy f lf), deltash) origmid ((Bdy g lg), deltasi) = do
@@ -333,10 +330,10 @@ layOutTwoCell c = propagateDeltasLO2C <$> partiallyLayOutTwoCell c
 
 
 
-data Point = Point Rational Rational
+data Point = Point Double Double
 
 instance Show Point where
-    show (Point x y) = "(" ++ show (approx x) ++ "," ++ show (approx y) ++ ")"
+    show (Point x y) = "(" ++ show x ++ "," ++ show y ++ ")"
 instance Render Point where
     render = T.pack . show
 
@@ -345,16 +342,16 @@ instance Num Point where
     (Point x1 y1) + (Point x2 y2) = Point (x1+x2) (y1+y2)
     (Point x1 y1) - (Point x2 y2) = Point (x1-x2) (y1-y2)
 
-y :: Point -> Rational
+y :: Point -> Double
 y (Point _ y) = y
 
-translateh :: Rational -> Point -> Point
+translateh :: Double -> Point -> Point
 translateh dx = (Point dx 0 +)
 
-translatev :: Rational -> Point -> Point
+translatev :: Double -> Point -> Point
 translatev dy = (Point 0 dy +)
 
-scalePoint :: Rational -> Point -> Point
+scalePoint :: Double -> Point -> Point
 scalePoint k (Point x y) = Point (k*x) (k*y)
 
 midPoint :: Point -> Point -> Point
@@ -374,7 +371,7 @@ data DrawableAtom = DrawableAtom {
     rightBdy :: [(Point, D1Cell)]
 }
 
-mkDrawableAtom :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> DrawableAtom
+mkDrawableAtom :: Double -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellAtom f g -> DrawableAtom
 mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
     let deltaFromBorder = Point (baseLength / 2) 0
         inputs = length1 f
@@ -395,7 +392,7 @@ mkDrawableAtom baseLength pl pr bdyl@(Bdy f unbdyl) bdyr@(Bdy g unbdyr) atom =
         rightBdy = pointsFromBdy bdyr (pr - midpt + deltaFromBorder)
      in DrawableAtom { uatom = untypeAtom atom, location, leftBdy, rightBdy }
 
-mkDrawableAtoms :: Rational -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [DrawableAtom]
+mkDrawableAtoms :: Double -> Point -> Point -> TwoCellBoundary f -> TwoCellBoundary g -> TwoCellSlice f g -> [DrawableAtom]
 mkDrawableAtoms baseLength pl pr bdyf bdyg (EmptySlice _) = []
 mkDrawableAtoms baseLength pl pr bdyf bdyg (ConsSlice atom q) = let
         (bdySrcAtom, midSrc, bdySrcQ) = splitBoundary' (srcAtom atom) (srcSlice q) bdyf
@@ -416,7 +413,7 @@ data Drawable2Cell = Drawable2Cell {
     d2CRightBdy :: [(Point, D1Cell)]
 }
 
-mkDrawable2Cell :: Rational -> LayedOut2Cell f g -> Drawable2Cell
+mkDrawable2Cell :: Double -> LayedOut2Cell f g -> Drawable2Cell
 mkDrawable2Cell baseLength c = let
         (p, columns) =
             second reverse $
@@ -551,7 +548,7 @@ placeAlongTrail trail param = let
     in moveTo point . rotateTo (direction tangent)
 
 pointToVec :: Point -> V2 Double
-pointToVec (Point x y) = scale 30 $ r2 (approx x, approx y)
+pointToVec (Point x y) = scale 30 $ r2 (x, y)
 
 pointToPoint :: Point -> P2 Double
 pointToPoint p = origin .+^ pointToVec p
